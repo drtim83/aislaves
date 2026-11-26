@@ -1,0 +1,93 @@
+id: sales-card-to-calendar
+name: "Card-to-Calendar Sales Growth Crew"
+version: "1.0.0"
+category: sales
+bundleLabel: "Bundle A — Sales Growth"
+processMode: sequential
+description: "Snap a business card photo in WhatsApp -> extract & enrich lead -> draft SOP-grounded cold email & Day-3/7 follow-ups -> approve in 1 tap -> auto-halt follow-ups & book calendar slot on reply."
+
+requiredCapabilities:
+  - capability:messaging
+  - capability:mail
+  - capability:calendar
+  - capability:crm
+
+optionalCapabilities:
+  - capability:spreadsheet
+
+knowledgeSlots:
+  - id: pricing_guide
+    label: "Products, Pricing Tiers & Pitch Deck (PDF/DOCX)"
+    required: true
+  - id: company_policies
+    label: "Sales SLA, Discount Limits & T&Cs"
+    required: false
+
+triggers:
+  - id: on_business_card_photo
+    source: capability:messaging
+    event: media.image.received
+    filter: "tag:card OR channel:sales-leads"
+    type: event
+  - id: on_prospect_reply
+    source: capability:mail
+    event: thread.reply.received
+    type: event
+  - id: daily_followup_sweep
+    type: cron
+    schedule: "0 9 * * 1-5"
+
+agents:
+  - id: card_scout
+    role: "Business Card OCR & Lead Enricher"
+    goal: "Extract clean contact fields from card photos, enrich company details, and deduplicate CRM leads."
+    modelTier: gemini-flash
+    uses: [capability:crm, capability:spreadsheet]
+    canDelegate: true
+    maxSteps: 10
+  - id: cold_writer
+    role: "Cold Outreach Copywriter"
+    goal: "Draft personalized cold emails strictly grounded in approved pricing guides and sales SOPs."
+    modelTier: gemini-pro
+    uses: [capability:mail, capability:crm]
+    slots: [pricing_guide, company_policies]
+    maxSteps: 8
+  - id: followup_nurturer
+    role: "Smart Follow-Up Cadence Agent"
+    goal: "Execute polite Day-3/Day-7 follow-ups and halt atomically the moment any human reply arrives."
+    modelTier: gemini-flash
+    uses: [capability:mail, capability:crm]
+    slots: [pricing_guide]
+    maxSteps: 8
+  - id: calendar_closer
+    role: "Inbox Reply & Calendar Appointment Setter"
+    goal: "Read positive replies, inspect live rep availability, and book calendar invites with Meet/Teams links."
+    modelTier: gemini-pro
+    uses: [capability:mail, capability:calendar, capability:crm]
+    maxSteps: 10
+
+tasks:
+  - id: extract_and_enrich
+    description: "Run multimodal OCR on card photo(s) and upsert deduplicated CRM lead."
+    agent: card_scout
+    trigger: on_business_card_photo
+    outputTo: cold_writer
+  - id: draft_intro_email
+    description: "Draft tailored cold outreach + Day-3/Day-7 cadence grounded in Pricing SOP."
+    agent: cold_writer
+    after: extract_and_enrich
+    requiresApproval: outbound_email_send
+  - id: run_followup_touch
+    description: "Run due follow-up touches for non-replied prospects."
+    agent: followup_nurturer
+    trigger: daily_followup_sweep
+    requiresApproval: outbound_email_send
+  - id: propose_and_book_meeting
+    description: "Halt remaining follow-ups on prospect reply, check free/busy, and stage calendar invite."
+    agent: calendar_closer
+    trigger: on_prospect_reply
+    requiresApproval: calendar_booking_confirm
+
+approvalGates:
+  - outbound_email_send
+  - calendar_booking_confirm

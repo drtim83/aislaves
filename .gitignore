@@ -18,6 +18,11 @@ serviceAccountKey*.json
 coverage/
 .nyc_output/
 
+# Local Slice 1 fallback store & workbook snapshots
+.aislaves-local/
+*.bak.xlsx
+*.tsbuildinfo
+
 # OS & editor files
 .DS_Store
 *.log

@@ -1,0 +1,68 @@
+id: sop-claims-pulse
+name: "Company SOP, Claims & Boss Daily Pulse Crew"
+version: "1.0.0"
+category: ops_sop
+bundleLabel: "Bundle C — Executive Ops & SOP"
+processMode: event_triggered
+description: "Cited Company Policy/SOP Q&A on WhatsApp -> staff expense receipt OCR verified against policy limits -> 8:30 AM Boss Daily Pulse briefing with 1-tap approval buttons."
+
+requiredCapabilities:
+  - capability:messaging
+  - capability:spreadsheet
+
+optionalCapabilities:
+  - capability:pos
+  - capability:accounting
+
+knowledgeSlots:
+  - id: company_policies
+    label: "Staff Handbook, Expense Claims & DO SOP (PDF/DOCX)"
+    required: true
+  - id: bookkeeping_folder
+    label: "Staff Claims & Petty Cash Workbook"
+    required: false
+
+triggers:
+  - id: staff_claim_photo
+    source: capability:messaging
+    event: media.receipt.received
+    type: event
+  - id: morning_boss_pulse
+    type: cron
+    schedule: "30 8 * * *"
+
+agents:
+  - id: sop_helpdesk
+    role: "Company Policy & SOP Helpdesk"
+    goal: "Answer staff operational questions strictly cited to exact handbook clauses within RBAC scope."
+    modelTier: gemini-flash
+    uses: [capability:messaging]
+    slots: [company_policies]
+    maxSteps: 6
+  - id: claims_verifier
+    role: "WhatsApp Staff Expense & DO Verifier"
+    goal: "Extract receipt amounts, verify against meal/mileage caps in Company Policies, and request 1-tap boss sign-off."
+    modelTier: gemini-flash
+    uses: [capability:messaging, capability:spreadsheet]
+    slots: [company_policies, bookkeeping_folder]
+    maxSteps: 8
+  - id: boss_daily_pulse
+    role: "8:30 AM Boss Daily Pulse Briefing Agent"
+    goal: "Summarize yesterday sales, variances, pending approvals, and booked sales calls cleanly on WhatsApp."
+    modelTier: gemini-pro
+    uses: [capability:messaging, capability:pos, capability:spreadsheet]
+    maxSteps: 6
+
+tasks:
+  - id: verify_expense_receipt
+    description: "OCR staff receipt, compare against Company Claims Policy section 4.2, and raise approval card."
+    agent: claims_verifier
+    trigger: staff_claim_photo
+    requiresApproval: expense_claim_payout
+  - id: send_morning_pulse
+    description: "Compile multi-crew KPIs into an executive WhatsApp morning brief."
+    agent: boss_daily_pulse
+    trigger: morning_boss_pulse
+
+approvalGates:
+  - expense_claim_payout

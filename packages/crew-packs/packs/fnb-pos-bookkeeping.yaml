@@ -1,0 +1,87 @@
+id: fnb-pos-bookkeeping
+name: "POS, Shared Excel & Accounting Crew"
+version: "1.0.0"
+category: finance_pos
+bundleLabel: "Bundle B — Back-Office Finance"
+processMode: hierarchical
+description: "Daily POS Z-report reconciliation across outlets -> formula-safe Shared Excel staging with automatic .bak backups -> supplier bill/MyInvois validation -> AR overdue chaser."
+
+requiredCapabilities:
+  - capability:pos
+  - capability:spreadsheet
+  - capability:accounting
+  - capability:messaging
+
+optionalCapabilities:
+  - capability:mail
+
+knowledgeSlots:
+  - id: bookkeeping_folder
+    label: "Shared Bookkeeping Folder & COA Reference"
+    required: true
+  - id: company_policies
+    label: "Cash Variance Thresholds, MyInvois & Expense SOP"
+    required: true
+
+triggers:
+  - id: nightly_pos_close
+    type: cron
+    schedule: "30 23 * * *"
+  - id: ap_invoice_uploaded
+    source: capability:messaging
+    event: media.document.received
+    type: event
+
+agents:
+  - id: pos_closer
+    role: "POS Daily Closing & Reconciler"
+    goal: "Pull multi-outlet StoreHub/Loyverse totals, flag cash/DuitNow variances, and stage daily Excel rows."
+    modelTier: gemini-flash
+    uses: [capability:pos, capability:spreadsheet, capability:messaging]
+    slots: [bookkeeping_folder, company_policies]
+    canDelegate: true
+    maxSteps: 12
+  - id: ap_bookkeeper
+    role: "AP Invoice & Receipt Bookkeeper"
+    goal: "Extract supplier invoice fields and stage draft bills in Xero, Bukku, or SQL Account."
+    modelTier: gemini-flash
+    uses: [capability:accounting, capability:spreadsheet]
+    slots: [bookkeeping_folder]
+    maxSteps: 10
+  - id: myinvois_validator
+    role: "Malaysia LHDN MyInvois & SST Validator"
+    goal: "Verify Buyer TIN, BRN, MSIC classification, and SST math before accounting submission."
+    modelTier: gemini-pro
+    uses: [capability:accounting, capability:messaging]
+    slots: [company_policies]
+    maxSteps: 8
+  - id: ar_chaser
+    role: "AR Overdue Payment Chaser"
+    goal: "Identify 7/14/30+ day overdue receivables and queue SOP-compliant WhatsApp/email reminders."
+    modelTier: gemini-flash
+    uses: [capability:accounting, capability:messaging]
+    slots: [company_policies]
+    maxSteps: 10
+  - id: payout_reconciler
+    role: "Marketplace & Delivery Payout Reconciler"
+    goal: "Match GrabFood, Shopee, and Foodpanda net bank payouts against POS gross sales and fees."
+    modelTier: gemini-flash
+    uses: [capability:pos, capability:spreadsheet]
+    slots: [bookkeeping_folder]
+    maxSteps: 10
+
+tasks:
+  - id: reconcile_daily_pos
+    description: "Reconcile Cash, DuitNow QR, Cards, and Delivery totals; flag variances above MYR 20 SOP cap."
+    agent: pos_closer
+    trigger: nightly_pos_close
+    outputTo: myinvois_validator
+    requiresApproval: excel_commit_update
+  - id: validate_einvoice_compliance
+    description: "Audit staged sales and supplier bills against LHDN MyInvois mandatory fields."
+    agent: myinvois_validator
+    after: reconcile_daily_pos
+
+approvalGates:
+  - excel_commit_update
+  - accounting_post_journal

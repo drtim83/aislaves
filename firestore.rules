@@ -1,0 +1,1418 @@
+rules_version = '2';
+
+// ============================================================================
+// AISlaves — Multi-Tenant Operator-Managed AI Workforce Platform
+// Cloud Firestore Security Rules (Prototype — Review & Emulator Test Required)
+// ============================================================================
+//
+// ===============================================================
+// Assumed Data Model
+// ===============================================================
+//
+// Collection: platform_operators/{uid}
+// Document ID: Firebase Auth UID of agency operator
+// Fields:
+//   - uid: string (optional, 1..128, must equal {uid}, immutable)
+//   - email: string (required, valid email <= 254 chars)
+//   - displayName: string (required, 1..120 chars)
+//   - role: string (required, enum: ['admin', 'builder', 'support'])
+//   - active: bool (required)
+//   - createdAt: timestamp (required, immutable)
+//   - updatedAt: timestamp (optional)
+//
+// Collection: demo_templates/{demoId}
+// Document ID: Demo template ID (e.g., 'demo-kopikita', 'demo-apex')
+// Fields:
+//   - id: string (required, 1..64, must equal {demoId}, immutable)
+//   - slug: string (required, slug 1..64)
+//   - name: string (required, 1..120)
+//   - industry: string (required, 1..120)
+//   - description: string (optional, 0..2000)
+//   - isDemo: bool (required, must be true, immutable)
+//   - installedPackIds: list<string> (optional, max 20 items, each 1..80)
+//   - subscription: map (optional, max 20 keys)
+//   - cartridges: map (optional, max 20 keys)
+//   - knowledgeSlots: map (optional, max 20 keys)
+//   - snapshot: map (optional, max 30 keys)
+//   - version: string (optional, 1..32)
+//   - createdAt: timestamp (required, immutable)
+//   - updatedAt: timestamp (optional)
+//
+// Collection: tenants/{orgId}
+// Document ID: Tenant organization ID
+// Fields:
+//   - id: string (required, 1..64, must equal {orgId}, immutable)
+//   - slug: string (required, slug 1..64)
+//   - name: string (required, 1..120)
+//   - industry: string (required, 1..120)
+//   - isDemo: bool (required, immutable)
+//   - status: string (optional, enum: ['active', 'paused', 'onboarding', 'archived'])
+//   - installedPackIds: list<string> (optional, max 20 items, each 1..80)
+//   - timezone: string (optional, 1..64)
+//   - whatsappPhoneNumberId: string (optional, 1..64)
+//   - createdAt: timestamp (required, immutable)
+//   - updatedAt: timestamp (optional)
+//
+// Subcollection: tenants/{orgId}/subscription/{docId}
+// Fields:
+//   - planId: string (required, enum: ['pilot_14d', 'starter_clerk', 'sme_growth', 'pro_workforce'])
+//   - monthlyRetainerMyr: number (optional, >= 0, <= 1000000)
+//   - setupFeeMyr: number (optional, >= 0, <= 1000000)
+//   - taskAllowance: int (required, >= 0, <= 1000000)
+//   - tasksUsed: int (required, >= 0, <= 10000000)
+//   - hardCapMyr: number (required, >= 0, <= 1000000)
+//   - cogsLedgerMyr: number (required, >= 0, <= 1000000)
+//   - status: string (required, enum: ['active', 'paused', 'trial'])
+//   - stripeCustomerId: string (optional, 1..128)
+//   - stripeSubscriptionId: string (optional, 1..128)
+//   - billingCycleStart: timestamp (optional)
+//   - billingCycleEnd: timestamp (optional)
+//   - createdAt: timestamp (optional, immutable if present)
+//   - updatedAt: timestamp (optional)
+//
+// Subcollection: tenants/{orgId}/members/{uid}
+// Document ID: Firebase Auth UID of SME portal member
+// Fields (strictly keys().hasOnly(['role', 'email', 'displayName', 'updatedAt'])):
+//   - role: string (required, enum: ['owner', 'manager', 'finance_reviewer', 'sales_rep', 'staff'])
+//   - email: string (required, valid email <= 254 chars)
+//   - displayName: string (required, 1..120 chars)
+//   - updatedAt: timestamp (optional for operator, required & recent for owner)
+//
+// Subcollection: tenants/{orgId}/magic_links/{tokenId}
+// Fields:
+//   - token: string (required, 6..128 chars)
+//   - tenantId: string (required, must equal {orgId}, immutable)
+//   - tenantName: string (optional, 1..120)
+//   - slotOrCapability: string (optional, 1..80)
+//   - missingCapabilities: list<CapabilityId> (optional, max 10)
+//   - missingSlots: list<KnowledgeSlotId> (optional, max 10)
+//   - status: string (required, enum: ['pending', 'completed', 'expired'])
+//   - createdAt: timestamp (required, immutable)
+//   - expiresAt: timestamp (required, > request.time when created pending)
+//   - completedAt: timestamp (optional)
+//   - completedByUid: string (optional, 1..128)
+//
+// Subcollection: tenants/{orgId}/cartridges/{cartridgeId} (Operator-only secrets)
+// Fields:
+//   - cartridgeId: string (required, 1..64)
+//   - capabilityId: string (optional, valid CapabilityId)
+//   - label: string (required, 1..120)
+//   - delivery: string (required, enum: ['cloud', 'edge-runner', 'sandbox'])
+//   - connected: bool (required)
+//   - connectedAt: timestamp (optional)
+//   - encryptedTokenRef: string (optional, 1..256)
+//   - config: map (optional, max 30 keys)
+//   - createdAt: timestamp (optional, immutable if present)
+//   - updatedAt: timestamp (optional)
+//
+// Subcollection: tenants/{orgId}/custom_apis/{apiId} (Operator-only endpoints/secrets)
+// Fields:
+//   - id: string (required, 1..64, must equal {apiId}, immutable)
+//   - tenantId: string (required, must equal {orgId}, immutable)
+//   - name: string (required, 1..120)
+//   - toolName: string (required, 1..80)
+//   - method: string (required, enum: ['GET', 'POST', 'PUT', 'PATCH'])
+//   - baseUrl: string (required, valid http/https URL <= 500)
+//   - path: string (required, 1..300)
+//   - authType: string (required, enum: ['bearer', 'api_key_header', 'none'])
+//   - policyTier: string (required, enum: ['READ', 'DRAFT', 'APPROVAL_REQUIRED', 'BLOCKED'])
+//   - inboundWebhookTriggerId: string (required, 1..100)
+//   - description: string (optional, 0..1000)
+//   - encryptedAuthSecretRef: string (optional, 1..256)
+//   - headers: map (optional, max 20 keys)
+//   - createdAt: timestamp (required, immutable)
+//   - updatedAt: timestamp (optional)
+//   - lastCalledAt: timestamp (optional)
+//   - lastResponsePreview: string (optional, 0..2000)
+//
+// Subcollection: tenants/{orgId}/mcp_servers/{serverId} (Operator-only config/credentials)
+// Fields:
+//   - id: string (required, 1..64, must equal {serverId}, immutable)
+//   - tenantId: string (optional, must equal {orgId}, immutable if present)
+//   - name: string (required, 1..120)
+//   - transport: string (required, enum: ['streamable_http', 'stdio_edge', 'sandbox'])
+//   - status: string (required, enum: ['healthy', 'degraded', 'offline', 'configuring'])
+//   - endpointUrl: string (optional, valid http/https URL <= 500)
+//   - capabilities: list<CapabilityId> (optional, max 10)
+//   - policyDefault: string (optional, enum: ['READ', 'DRAFT', 'APPROVAL_REQUIRED', 'BLOCKED'])
+//   - encryptedBearerRef: string (optional, 1..256)
+//   - healthCheckedAt: timestamp (optional)
+//   - createdAt: timestamp (required, immutable)
+//   - updatedAt: timestamp (optional)
+//
+// Subcollection: tenants/{orgId}/role_templates/{templateId}
+// Fields:
+//   - id: string (required, 1..80, must equal {templateId}, immutable)
+//   - name: string (required, 1..120)
+//   - version: string (required, 1..32)
+//   - category: string (required, enum: ['sales', 'finance_pos', 'ops_sop'])
+//   - bundleLabel: string (optional, 1..120)
+//   - processMode: string (required, enum: ['sequential', 'hierarchical', 'event_triggered'])
+//   - description: string (required, 1..2000)
+//   - requiredCapabilities, optionalCapabilities: list<CapabilityId> (optional, max 10)
+//   - knowledgeSlots, triggers, agents, tasks: list (optional, max 50)
+//   - approvalGates: list<string> (optional, max 20, each 1..80)
+//   - tenantOverrides: map (optional, max 30 keys)
+//   - createdAt: timestamp (required, immutable)
+//   - updatedAt: timestamp (optional)
+//
+// Subcollection: tenants/{orgId}/hired_agents/{employeeId}
+// Fields:
+//   - id: string (required, 1..64, must equal {employeeId}, immutable)
+//   - orgId: string (required, must equal {orgId}, immutable)
+//   - name: string (required, 1..120)
+//   - department: string (optional, 1..64)
+//   - role: string (required, 1..120)
+//   - goal: string (required, 1..1000)
+//   - backstory: string (optional, 0..3000)
+//   - sopCollectionIds: list<string> (optional, max 20, each 1..64)
+//   - mcpToolAllowlist: list<string> (optional, max 30, each 1..80)
+//   - uses: list<CapabilityId> (optional, max 10)
+//   - slots: list<KnowledgeSlotId> (optional, max 10)
+//   - modelTier: string (required, enum: ['gemini-flash', 'gemini-pro', 'local-ollama'])
+//   - status: string (required, enum: ['active', 'paused', 'staged'])
+//   - canDelegate: bool (optional)
+//   - maxSteps: int (required, 1..50)
+//   - maxRunCostMyr: number (optional, 0..10000)
+//   - templateId: string (optional, 1..80)
+//   - createdAt: timestamp (required, immutable)
+//   - updatedAt: timestamp (optional)
+//
+// Subcollection: tenants/{orgId}/hired_crews/{crewId}
+// Fields:
+//   - id: string (required, 1..64, must equal {crewId}, immutable)
+//   - orgId: string (required, must equal {orgId}, immutable)
+//   - packId: string (required, 1..80)
+//   - name: string (required, 1..120)
+//   - processMode: string (required, enum: ['sequential', 'hierarchical', 'event_triggered'])
+//   - status: string (required, enum: ['staged', 'active', 'paused'])
+//   - agentIds: list<string> (optional, max 25, each 1..64)
+//   - approvalGates: list<string> (optional, max 20, each 1..80)
+//   - scheduleCron: string (optional, 0..100)
+//   - maxSpawnDepth: int (optional, 1..5)
+//   - maxConcurrentSpawns: int (optional, 1..100)
+//   - dailyTokenBudget: int (optional, 0..10000000)
+//   - createdAt: timestamp (required, immutable)
+//   - updatedAt: timestamp (optional)
+//
+// Subcollection: tenants/{orgId}/outreach_sequences/{seqId}
+// Fields:
+//   - id: string (required, 1..64, must equal {seqId}, immutable)
+//   - tenantId: string (required, must equal {orgId}, immutable)
+//   - leadId: string (required, 1..64)
+//   - leadEmail: string (required, valid email <= 254)
+//   - leadName: string (required, 1..120)
+//   - company: string (required, 1..160)
+//   - subject: string (required, 1..300)
+//   - body: string (required, 1..20000)
+//   - sopCitation: string (optional, 0..500)
+//   - status: string (required, enum: ['pending_approval', 'active_cadence', 'replied_halted', 'meeting_booked', 'rejected'])
+//   - scheduledFollowUps: list (optional, max 10)
+//   - replySnippet: string (optional, 0..2000)
+//   - bookedSlot: map (optional, keys: ['startIso', 'displayLabel', 'meetLink'])
+//   - createdAt: timestamp (optional, immutable if present)
+//   - updatedAt: timestamp (optional)
+//
+// Subcollection: tenants/{orgId}/runs/{runId}
+// Fields:
+//   - id: string (required, 1..64, must equal {runId}, immutable)
+//   - tenantId: string (required, must equal {orgId}, immutable)
+//   - crewPackId: string (required, 1..80)
+//   - triggerLabel: string (required, 1..200)
+//   - status: string (required, enum: ['running', 'completed', 'awaiting_approval', 'blocked_cap', 'blocked_paused', 'failed'])
+//   - startedAt: timestamp (required, immutable)
+//   - completedAt: timestamp (optional)
+//   - spawnedWorkersCount: int (required, 0..500)
+//   - totalCogsMyr: number (required, 0..100000)
+//   - steps: list (optional, max 100)
+//   - errorMessage: string (optional, 0..2000)
+//   - updatedAt: timestamp (optional)
+//
+// Subcollection: tenants/{orgId}/runs/{runId}/steps/{stepId}
+// Fields:
+//   - id: string (optional, 1..64, must equal {stepId}, immutable if present)
+//   - stepNumber: int (required, 1..1000)
+//   - agentId: string (required, 1..80)
+//   - agentRole: string (required, 1..120)
+//   - modelTier: string (required, enum: ['gemini-flash', 'gemini-pro', 'local-ollama', 'deterministic'])
+//   - toolUsed: string (required, 1..120)
+//   - policyDecision: string (required, enum: ['ALLOW', 'PAUSE_FOR_APPROVAL', 'BLOCKED'])
+//   - summary: string (required, 1..4000)
+//   - citation: string (optional, 0..500)
+//   - zodValid: bool (optional)
+//   - latencyMs: int (required, 0..3600000)
+//   - cogsMyr: number (required, 0..10000)
+//   - createdAt: timestamp (optional, immutable if present)
+//
+// Subcollection: tenants/{orgId}/knowledge_collections/{colId}
+// Fields:
+//   - id: string (required, 1..64, must equal {colId}, immutable)
+//   - tenantId: string (required, must equal {orgId}, immutable)
+//   - slotId: string (required, enum: ['pricing_guide', 'company_policies', 'bookkeeping_folder', 'brand_voice'])
+//   - docName: string (required, 1..200)
+//   - summary: string (optional, 0..2000)
+//   - citationsCount: int (optional, 0..100000)
+//   - indexed: bool (required; must be false on client create, unchanged on client update)
+//   - excerptSample: string (optional, 0..1000)
+//   - departmentScope: string (optional, enum: ['public_sales', 'all_staff', 'finance_only', 'hr_confidential'])
+//   - storagePath: string (optional, scoped to tenants/{orgId}/..., <= 400)
+//   - mimeType: string (optional, 1..120)
+//   - fileSizeBytes: int (optional, 0..52428800)
+//   - uploadedByUid: string (optional for operator, required == auth.uid for client create, immutable)
+//   - createdAt: timestamp (optional, immutable if present)
+//   - updatedAt: timestamp (required)
+//
+// Subcollection: tenants/{orgId}/knowledge_collections/{colId}/chunks/{chunkId}
+// Fields (operator/server writes only):
+//   - id: string (required, 1..80, must equal {chunkId}, immutable)
+//   - tenantId: string (required, must equal {orgId}, immutable)
+//   - collectionId: string (required, must equal {colId}, immutable)
+//   - chunkIndex: int (required, 0..100000)
+//   - content: string (required, 1..16000)
+//   - sectionRef: string (optional, 0..200)
+//   - pageNumber: int (optional, 1..10000)
+//   - departmentScope: string (optional, enum: ['public_sales', 'all_staff', 'finance_only', 'hr_confidential'])
+//   - embeddingModel: string (optional, 1..80)
+//   - embedding: list (optional, max 4096)
+//   - createdAt: timestamp (required, immutable)
+//
+// Subcollection: tenants/{orgId}/shared_workbooks/{workbookId}
+// Fields:
+//   - id: string (required, 1..64, must equal {workbookId}, immutable)
+//   - tenantId: string (required, must equal {orgId}, immutable)
+//   - fileName: string (required, 1..200)
+//   - provider: string (optional, enum: ['local_exceljs', 'gdrive_sheets', 'onedrive_excel', 'smb_local_folder', 'dropbox_upload'])
+//   - folderPath: string (optional, 0..400)
+//   - storagePath: string (optional, scoped to tenants/{orgId}/..., <= 400)
+//   - preservedFormulas: list<string> (optional, max 30, each 1..200)
+//   - backups, committedRows, stagingRows: list (optional, operator-only mutation, max 500)
+//   - lockedColumns: list<string> (optional, max 30, each 1..80)
+//   - leaseLockedBy: string (optional, 0..128)
+//   - leaseExpiresAt: timestamp (optional)
+//   - uploadedByUid: string (optional for operator, required == auth.uid for client create, immutable)
+//   - createdAt: timestamp (optional, immutable if present)
+//   - lastUpdatedAt: timestamp (required)
+//
+// Subcollection: tenants/{orgId}/leads/{leadId}
+// Fields:
+//   - id: string (required, 1..64, must equal {leadId}, immutable)
+//   - tenantId: string (required, must equal {orgId}, immutable)
+//   - fullName: string (required, 1..120)
+//   - jobTitle: string (optional, 0..120)
+//   - company: string (required, 1..160)
+//   - email: string (optional, valid email <= 254)
+//   - phone: string (optional, 0..40)
+//   - source: string (required, enum: ['whatsapp_card_ocr', 'batch_expo_ocr', 'inbound_webhook', 'manual_operator'])
+//   - ocrConfidence: number (required, 0..1)
+//   - stage: string (required, enum: ['new_lead', 'awaiting_approval', 'outreach_active', 'replied_positive', 'meeting_booked', 'archived'])
+//   - dedupeHash: string (optional, 1..128)
+//   - notes: string (optional, 0..2000)
+//   - createdAt: timestamp (required, immutable)
+//   - updatedAt: timestamp (optional)
+//
+// Subcollection: tenants/{orgId}/approvals/{approvalId}
+// Fields:
+//   - id: string (required, 1..64, must equal {approvalId}, immutable)
+//   - tenantId: string (required, must equal {orgId}, immutable)
+//   - runId: string (required, 1..64, immutable)
+//   - idempotencyKey: string (required, 8..128, immutable)
+//   - actionType: string (required, enum: ['outbound_email_send', 'calendar_booking_confirm', 'excel_commit_update', 'expense_claim_payout'], immutable)
+//   - title: string (required, 1..200)
+//   - summary: string (required, 1..2000)
+//   - channel: string (required, enum: ['whatsapp', 'portal'])
+//   - status: string (required, enum: ['pending', 'approved', 'rejected'])
+//   - createdAt: timestamp (required, immutable)
+//   - decidedAt: timestamp (optional; required & recent on client decision)
+//   - decidedBy: string (optional, 1..128; required == auth.uid on client decision)
+//   - decisionNote: string (optional, 0..1000)
+//   - payload: map (required, max 30 keys, immutable)
+//
+// Subcollection: tenants/{orgId}/audit_logs/{auditId} (Append-only immutable ledger)
+// Fields:
+//   - id: string (required, 1..64, must equal {auditId})
+//   - tenantId: string (required, must equal {orgId})
+//   - actor: string (required, 1..120)
+//   - actorUid: string (optional, 1..128)
+//   - event: string (required, 1..120)
+//   - detail: string (required, 1..4000)
+//   - runId: string (optional, 1..64)
+//   - approvalId: string (optional, 1..64)
+//   - timestamp: timestamp (required)
+//
+// ===============================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Core Auth, Role & Structural Helper Functions
+    // ===============================================================
+
+    function isAuthenticated() {
+      return request.auth != null &&
+        request.auth.uid != null &&
+        !('firebase' in request.auth.token &&
+          'sign_in_provider' in request.auth.token.firebase &&
+          request.auth.token.firebase.sign_in_provider == 'anonymous');
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isDocOwner() {
+      return isAuthenticated() &&
+        'uid' in resource.data &&
+        request.auth.uid == resource.data.uid;
+    }
+
+    function uidUnchanged() {
+      return !('uid' in request.resource.data) ||
+        request.resource.data.uid == request.auth.uid;
+    }
+
+    function uidNotModified() {
+      return !('uid' in request.resource.data) ||
+        ('uid' in resource.data && request.resource.data.uid == resource.data.uid);
+    }
+
+    function operatorPath(uid) {
+      return /databases/$(database)/documents/platform_operators/$(uid);
+    }
+
+    function isOperator() {
+      return isAuthenticated() &&
+        exists(operatorPath(request.auth.uid)) &&
+        get(operatorPath(request.auth.uid)).data.active == true &&
+        get(operatorPath(request.auth.uid)).data.role in ['admin', 'builder', 'support'];
+    }
+
+    function isOperatorAdmin() {
+      return isAuthenticated() &&
+        exists(operatorPath(request.auth.uid)) &&
+        get(operatorPath(request.auth.uid)).data.active == true &&
+        get(operatorPath(request.auth.uid)).data.role == 'admin';
+    }
+
+    function tenantPath(orgId) {
+      return /databases/$(database)/documents/tenants/$(orgId);
+    }
+
+    function tenantExists(orgId) {
+      return orgId.size() >= 1 &&
+        orgId.size() <= 64 &&
+        !orgId.matches('.*\\.\\..*') &&
+        exists(tenantPath(orgId));
+    }
+
+    function tenantExistsOrCreatedAfter(orgId) {
+      return orgId.size() >= 1 &&
+        orgId.size() <= 64 &&
+        !orgId.matches('.*\\.\\..*') &&
+        existsAfter(tenantPath(orgId));
+    }
+
+    function memberPath(orgId, uid) {
+      return /databases/$(database)/documents/tenants/$(orgId)/members/$(uid);
+    }
+
+    function isTenantMember(orgId) {
+      return isAuthenticated() &&
+        tenantExists(orgId) &&
+        exists(memberPath(orgId, request.auth.uid)) &&
+        get(memberPath(orgId, request.auth.uid)).data.role in [
+          'owner', 'manager', 'finance_reviewer', 'sales_rep', 'staff'
+        ];
+    }
+
+    function isTenantOwner(orgId) {
+      return isAuthenticated() &&
+        tenantExists(orgId) &&
+        exists(memberPath(orgId, request.auth.uid)) &&
+        get(memberPath(orgId, request.auth.uid)).data.role == 'owner';
+    }
+
+    function isTenantManagerOrOwner(orgId) {
+      return isAuthenticated() &&
+        tenantExists(orgId) &&
+        exists(memberPath(orgId, request.auth.uid)) &&
+        get(memberPath(orgId, request.auth.uid)).data.role in ['owner', 'manager'];
+    }
+
+    function isTenantApprover(orgId) {
+      return isAuthenticated() &&
+        tenantExists(orgId) &&
+        exists(memberPath(orgId, request.auth.uid)) &&
+        get(memberPath(orgId, request.auth.uid)).data.role in [
+          'owner', 'manager', 'finance_reviewer'
+        ];
+    }
+
+    // ===============================================================
+    // Generic Data & Field Validation Helpers
+    // ===============================================================
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function areImmutableFieldsUnchanged(fields) {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(fields);
+    }
+
+    function isOptionalImmutableFieldUnchanged(field) {
+      return !(field in resource.data) ||
+        (field in request.resource.data && request.resource.data[field] == resource.data[field]);
+    }
+
+    function isBoundedString(val, minLen, maxLen) {
+      return val is string &&
+        val.size() >= minLen &&
+        val.size() <= maxLen;
+    }
+
+    function validStringLength(field, minLen, maxLen) {
+      return field in request.resource.data &&
+        isBoundedString(request.resource.data[field], minLen, maxLen);
+    }
+
+    function isValidOptionalString(field, minLen, maxLen) {
+      return !(field in request.resource.data) ||
+        isBoundedString(request.resource.data[field], minLen, maxLen);
+    }
+
+    function isValidSlug(slug) {
+      return isBoundedString(slug, 1, 64) &&
+        slug.matches('^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$');
+    }
+
+    function isValidUrl(url) {
+      return isBoundedString(url, 8, 500) &&
+        (url.matches('^https://.*') || url.matches('^http://.*'));
+    }
+
+    function isValidEmail(email) {
+      return isBoundedString(email, 3, 254) &&
+        email.matches('^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$');
+    }
+
+    function isPositive(field) {
+      return field in request.resource.data &&
+        request.resource.data[field] is number &&
+        request.resource.data[field] > 0;
+    }
+
+    function isValidList(listVal, maxSize) {
+      return listVal is list && listVal.size() <= maxSize;
+    }
+
+    function isValidMap(mapData, allowedKeys) {
+      return mapData is map && mapData.keys().hasOnly(allowedKeys);
+    }
+
+    function isBoundedMap(mapData, maxKeys) {
+      return mapData is map && mapData.size() <= maxKeys;
+    }
+
+    function isRecent(timeVal) {
+      return timeVal is timestamp &&
+        timeVal > request.time - duration.value(5, 'm') &&
+        timeVal <= request.time;
+    }
+
+    function isTenantScopedStoragePath(path, orgId) {
+      return isBoundedString(path, 1, 400) &&
+        !path.matches('.*\\.\\..*') &&
+        !path.matches('.*\\\\.*') &&
+        path.split('/').size() >= 3 &&
+        path.split('/')[0] == 'tenants' &&
+        path.split('/')[1] == orgId;
+    }
+
+    function isBoundedStringList(arr, maxItems, maxItemLen) {
+      return arr is list &&
+        arr.size() <= maxItems &&
+        (arr.size() <= 0 || isBoundedString(arr[0], 1, maxItemLen)) &&
+        (arr.size() <= 1 || isBoundedString(arr[1], 1, maxItemLen)) &&
+        (arr.size() <= 2 || isBoundedString(arr[2], 1, maxItemLen)) &&
+        (arr.size() <= 3 || isBoundedString(arr[3], 1, maxItemLen)) &&
+        (arr.size() <= 4 || isBoundedString(arr[4], 1, maxItemLen)) &&
+        (arr.size() <= 5 || isBoundedString(arr[5], 1, maxItemLen)) &&
+        (arr.size() <= 6 || isBoundedString(arr[6], 1, maxItemLen)) &&
+        (arr.size() <= 7 || isBoundedString(arr[7], 1, maxItemLen)) &&
+        (arr.size() <= 8 || isBoundedString(arr[8], 1, maxItemLen)) &&
+        (arr.size() <= 9 || isBoundedString(arr[9], 1, maxItemLen)) &&
+        (arr.size() <= 10 || isBoundedString(arr[10], 1, maxItemLen)) &&
+        (arr.size() <= 11 || isBoundedString(arr[11], 1, maxItemLen)) &&
+        (arr.size() <= 12 || isBoundedString(arr[12], 1, maxItemLen)) &&
+        (arr.size() <= 13 || isBoundedString(arr[13], 1, maxItemLen)) &&
+        (arr.size() <= 14 || isBoundedString(arr[14], 1, maxItemLen)) &&
+        (arr.size() <= 15 || isBoundedString(arr[15], 1, maxItemLen)) &&
+        (arr.size() <= 16 || isBoundedString(arr[16], 1, maxItemLen)) &&
+        (arr.size() <= 17 || isBoundedString(arr[17], 1, maxItemLen)) &&
+        (arr.size() <= 18 || isBoundedString(arr[18], 1, maxItemLen)) &&
+        (arr.size() <= 19 || isBoundedString(arr[19], 1, maxItemLen)) &&
+        (arr.size() <= 20 || isBoundedString(arr[20], 1, maxItemLen)) &&
+        (arr.size() <= 21 || isBoundedString(arr[21], 1, maxItemLen)) &&
+        (arr.size() <= 22 || isBoundedString(arr[22], 1, maxItemLen)) &&
+        (arr.size() <= 23 || isBoundedString(arr[23], 1, maxItemLen)) &&
+        (arr.size() <= 24 || isBoundedString(arr[24], 1, maxItemLen)) &&
+        (arr.size() <= 25 || isBoundedString(arr[25], 1, maxItemLen)) &&
+        (arr.size() <= 26 || isBoundedString(arr[26], 1, maxItemLen)) &&
+        (arr.size() <= 27 || isBoundedString(arr[27], 1, maxItemLen)) &&
+        (arr.size() <= 28 || isBoundedString(arr[28], 1, maxItemLen)) &&
+        (arr.size() <= 29 || isBoundedString(arr[29], 1, maxItemLen));
+    }
+
+    function isValidCapabilityList(arr) {
+      return arr is list &&
+        arr.size() <= 10 &&
+        arr.hasOnly([
+          'capability:pos',
+          'capability:accounting',
+          'capability:spreadsheet',
+          'capability:messaging',
+          'capability:mail',
+          'capability:calendar',
+          'capability:crm'
+        ]);
+    }
+
+    function isValidSlotList(arr) {
+      return arr is list &&
+        arr.size() <= 10 &&
+        arr.hasOnly([
+          'pricing_guide',
+          'company_policies',
+          'bookkeeping_folder',
+          'brand_voice'
+        ]);
+    }
+
+    // ===============================================================
+    // Domain Validators (MUST be called on BOTH create and update)
+    // ===============================================================
+
+    function isValidPlatformOperator(data, uid) {
+      return data.keys().hasAll(['email', 'displayName', 'role', 'active', 'createdAt']) &&
+        data.keys().hasOnly(['uid', 'email', 'displayName', 'role', 'active', 'createdAt', 'updatedAt']) &&
+        (!('uid' in data) || (isBoundedString(data.uid, 1, 128) && data.uid == uid)) &&
+        isValidEmail(data.email) &&
+        isBoundedString(data.displayName, 1, 120) &&
+        data.role in ['admin', 'builder', 'support'] &&
+        data.active is bool &&
+        data.createdAt is timestamp &&
+        (!('updatedAt' in data) || data.updatedAt is timestamp);
+    }
+
+    function isValidDemoTemplate(data, demoId) {
+      return data.keys().hasAll(['id', 'slug', 'name', 'industry', 'isDemo', 'createdAt']) &&
+        data.keys().hasOnly([
+          'id', 'slug', 'name', 'industry', 'description', 'isDemo',
+          'installedPackIds', 'subscription', 'cartridges', 'knowledgeSlots',
+          'snapshot', 'version', 'createdAt', 'updatedAt'
+        ]) &&
+        isBoundedString(data.id, 1, 64) && data.id == demoId &&
+        isValidSlug(data.slug) &&
+        isBoundedString(data.name, 1, 120) &&
+        isBoundedString(data.industry, 1, 120) &&
+        (!('description' in data) || isBoundedString(data.description, 0, 2000)) &&
+        data.isDemo is bool && data.isDemo == true &&
+        (!('installedPackIds' in data) || isBoundedStringList(data.installedPackIds, 20, 80)) &&
+        (!('subscription' in data) || isBoundedMap(data.subscription, 20)) &&
+        (!('cartridges' in data) || isBoundedMap(data.cartridges, 20)) &&
+        (!('knowledgeSlots' in data) || isBoundedMap(data.knowledgeSlots, 20)) &&
+        (!('snapshot' in data) || isBoundedMap(data.snapshot, 30)) &&
+        (!('version' in data) || isBoundedString(data.version, 1, 32)) &&
+        data.createdAt is timestamp &&
+        (!('updatedAt' in data) || data.updatedAt is timestamp);
+    }
+
+    function isValidTenant(data, orgId) {
+      return data.keys().hasAll(['id', 'slug', 'name', 'industry', 'isDemo', 'createdAt']) &&
+        data.keys().hasOnly([
+          'id', 'slug', 'name', 'industry', 'isDemo', 'status',
+          'installedPackIds', 'timezone', 'whatsappPhoneNumberId',
+          'createdAt', 'updatedAt'
+        ]) &&
+        isBoundedString(data.id, 1, 64) && data.id == orgId &&
+        isValidSlug(data.slug) &&
+        isBoundedString(data.name, 1, 120) &&
+        isBoundedString(data.industry, 1, 120) &&
+        data.isDemo is bool &&
+        (!('status' in data) || data.status in ['active', 'paused', 'onboarding', 'archived']) &&
+        (!('installedPackIds' in data) || isBoundedStringList(data.installedPackIds, 20, 80)) &&
+        (!('timezone' in data) || isBoundedString(data.timezone, 1, 64)) &&
+        (!('whatsappPhoneNumberId' in data) || isBoundedString(data.whatsappPhoneNumberId, 1, 64)) &&
+        data.createdAt is timestamp &&
+        (!('updatedAt' in data) || data.updatedAt is timestamp);
+    }
+
+    function isValidSubscription(data) {
+      return data.keys().hasAll(['planId', 'taskAllowance', 'tasksUsed', 'hardCapMyr', 'cogsLedgerMyr', 'status']) &&
+        data.keys().hasOnly([
+          'planId', 'monthlyRetainerMyr', 'setupFeeMyr', 'taskAllowance',
+          'tasksUsed', 'hardCapMyr', 'cogsLedgerMyr', 'status',
+          'stripeCustomerId', 'stripeSubscriptionId',
+          'billingCycleStart', 'billingCycleEnd', 'createdAt', 'updatedAt'
+        ]) &&
+        data.planId in ['pilot_14d', 'starter_clerk', 'sme_growth', 'pro_workforce'] &&
+        (!('monthlyRetainerMyr' in data) || (data.monthlyRetainerMyr is number && data.monthlyRetainerMyr >= 0 && data.monthlyRetainerMyr <= 1000000)) &&
+        (!('setupFeeMyr' in data) || (data.setupFeeMyr is number && data.setupFeeMyr >= 0 && data.setupFeeMyr <= 1000000)) &&
+        data.taskAllowance is int && data.taskAllowance >= 0 && data.taskAllowance <= 1000000 &&
+        data.tasksUsed is int && data.tasksUsed >= 0 && data.tasksUsed <= 10000000 &&
+        data.hardCapMyr is number && data.hardCapMyr >= 0 && data.hardCapMyr <= 1000000 &&
+        data.cogsLedgerMyr is number && data.cogsLedgerMyr >= 0 && data.cogsLedgerMyr <= 1000000 &&
+        data.status in ['active', 'paused', 'trial'] &&
+        (!('stripeCustomerId' in data) || isBoundedString(data.stripeCustomerId, 1, 128)) &&
+        (!('stripeSubscriptionId' in data) || isBoundedString(data.stripeSubscriptionId, 1, 128)) &&
+        (!('billingCycleStart' in data) || data.billingCycleStart is timestamp) &&
+        (!('billingCycleEnd' in data) || data.billingCycleEnd is timestamp) &&
+        (!('createdAt' in data) || data.createdAt is timestamp) &&
+        (!('updatedAt' in data) || data.updatedAt is timestamp);
+    }
+
+    function isValidMember(data) {
+      return data.keys().hasAll(['role', 'email', 'displayName']) &&
+        data.keys().hasOnly(['role', 'email', 'displayName', 'updatedAt']) &&
+        data.role in ['owner', 'manager', 'finance_reviewer', 'sales_rep', 'staff'] &&
+        isValidEmail(data.email) &&
+        isBoundedString(data.displayName, 1, 120) &&
+        (!('updatedAt' in data) || data.updatedAt is timestamp);
+    }
+
+    function isValidMagicLink(data, orgId) {
+      return data.keys().hasAll(['token', 'tenantId', 'status', 'createdAt', 'expiresAt']) &&
+        data.keys().hasOnly([
+          'token', 'tenantId', 'tenantName', 'slotOrCapability',
+          'missingCapabilities', 'missingSlots', 'status',
+          'createdAt', 'expiresAt', 'completedAt', 'completedByUid'
+        ]) &&
+        isBoundedString(data.token, 6, 128) &&
+        isBoundedString(data.tenantId, 1, 64) && data.tenantId == orgId &&
+        (!('tenantName' in data) || isBoundedString(data.tenantName, 1, 120)) &&
+        (!('slotOrCapability' in data) || isBoundedString(data.slotOrCapability, 1, 80)) &&
+        (!('missingCapabilities' in data) || isValidCapabilityList(data.missingCapabilities)) &&
+        (!('missingSlots' in data) || isValidSlotList(data.missingSlots)) &&
+        data.status in ['pending', 'completed', 'expired'] &&
+        data.createdAt is timestamp &&
+        data.expiresAt is timestamp &&
+        (!('completedAt' in data) || data.completedAt is timestamp) &&
+        (!('completedByUid' in data) || isBoundedString(data.completedByUid, 1, 128));
+    }
+
+    function isValidCartridge(data) {
+      return data.keys().hasAll(['cartridgeId', 'label', 'delivery', 'connected']) &&
+        data.keys().hasOnly([
+          'cartridgeId', 'capabilityId', 'label', 'delivery', 'connected',
+          'connectedAt', 'encryptedTokenRef', 'config', 'createdAt', 'updatedAt'
+        ]) &&
+        isBoundedString(data.cartridgeId, 1, 64) &&
+        (!('capabilityId' in data) || data.capabilityId in [
+          'capability:pos', 'capability:accounting', 'capability:spreadsheet',
+          'capability:messaging', 'capability:mail', 'capability:calendar', 'capability:crm'
+        ]) &&
+        isBoundedString(data.label, 1, 120) &&
+        data.delivery in ['cloud', 'edge-runner', 'sandbox'] &&
+        data.connected is bool &&
+        (!('connectedAt' in data) || data.connectedAt is timestamp) &&
+        (!('encryptedTokenRef' in data) || isBoundedString(data.encryptedTokenRef, 1, 256)) &&
+        (!('config' in data) || isBoundedMap(data.config, 30)) &&
+        (!('createdAt' in data) || data.createdAt is timestamp) &&
+        (!('updatedAt' in data) || data.updatedAt is timestamp);
+    }
+
+    function isValidCustomApi(data, apiId, orgId) {
+      return data.keys().hasAll([
+          'id', 'tenantId', 'name', 'toolName', 'method', 'baseUrl',
+          'path', 'authType', 'policyTier', 'inboundWebhookTriggerId', 'createdAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'tenantId', 'name', 'toolName', 'method', 'baseUrl',
+          'path', 'authType', 'policyTier', 'inboundWebhookTriggerId',
+          'description', 'encryptedAuthSecretRef', 'headers',
+          'createdAt', 'updatedAt', 'lastCalledAt', 'lastResponsePreview'
+        ]) &&
+        isBoundedString(data.id, 1, 64) && data.id == apiId &&
+        isBoundedString(data.tenantId, 1, 64) && data.tenantId == orgId &&
+        isBoundedString(data.name, 1, 120) &&
+        isBoundedString(data.toolName, 1, 80) &&
+        data.method in ['GET', 'POST', 'PUT', 'PATCH'] &&
+        isValidUrl(data.baseUrl) &&
+        isBoundedString(data.path, 1, 300) &&
+        data.authType in ['bearer', 'api_key_header', 'none'] &&
+        data.policyTier in ['READ', 'DRAFT', 'APPROVAL_REQUIRED', 'BLOCKED'] &&
+        isBoundedString(data.inboundWebhookTriggerId, 1, 100) &&
+        (!('description' in data) || isBoundedString(data.description, 0, 1000)) &&
+        (!('encryptedAuthSecretRef' in data) || isBoundedString(data.encryptedAuthSecretRef, 1, 256)) &&
+        (!('headers' in data) || isBoundedMap(data.headers, 20)) &&
+        data.createdAt is timestamp &&
+        (!('updatedAt' in data) || data.updatedAt is timestamp) &&
+        (!('lastCalledAt' in data) || data.lastCalledAt is timestamp) &&
+        (!('lastResponsePreview' in data) || isBoundedString(data.lastResponsePreview, 0, 2000));
+    }
+
+    function isValidMcpServer(data, serverId, orgId) {
+      return data.keys().hasAll(['id', 'name', 'transport', 'status', 'createdAt']) &&
+        data.keys().hasOnly([
+          'id', 'tenantId', 'name', 'transport', 'status', 'endpointUrl',
+          'capabilities', 'policyDefault', 'encryptedBearerRef',
+          'healthCheckedAt', 'createdAt', 'updatedAt'
+        ]) &&
+        isBoundedString(data.id, 1, 64) && data.id == serverId &&
+        (!('tenantId' in data) || (isBoundedString(data.tenantId, 1, 64) && data.tenantId == orgId)) &&
+        isBoundedString(data.name, 1, 120) &&
+        data.transport in ['streamable_http', 'stdio_edge', 'sandbox'] &&
+        data.status in ['healthy', 'degraded', 'offline', 'configuring'] &&
+        (!('endpointUrl' in data) || isValidUrl(data.endpointUrl)) &&
+        (!('capabilities' in data) || isValidCapabilityList(data.capabilities)) &&
+        (!('policyDefault' in data) || data.policyDefault in ['READ', 'DRAFT', 'APPROVAL_REQUIRED', 'BLOCKED']) &&
+        (!('encryptedBearerRef' in data) || isBoundedString(data.encryptedBearerRef, 1, 256)) &&
+        (!('healthCheckedAt' in data) || data.healthCheckedAt is timestamp) &&
+        data.createdAt is timestamp &&
+        (!('updatedAt' in data) || data.updatedAt is timestamp);
+    }
+
+    function isValidRoleTemplate(data, templateId) {
+      return data.keys().hasAll(['id', 'name', 'version', 'category', 'processMode', 'description', 'createdAt']) &&
+        data.keys().hasOnly([
+          'id', 'name', 'version', 'category', 'bundleLabel', 'processMode',
+          'description', 'requiredCapabilities', 'optionalCapabilities',
+          'knowledgeSlots', 'triggers', 'agents', 'tasks', 'approvalGates',
+          'tenantOverrides', 'createdAt', 'updatedAt'
+        ]) &&
+        isBoundedString(data.id, 1, 80) && data.id == templateId &&
+        isBoundedString(data.name, 1, 120) &&
+        isBoundedString(data.version, 1, 32) &&
+        data.category in ['sales', 'finance_pos', 'ops_sop'] &&
+        (!('bundleLabel' in data) || isBoundedString(data.bundleLabel, 1, 120)) &&
+        data.processMode in ['sequential', 'hierarchical', 'event_triggered'] &&
+        isBoundedString(data.description, 1, 2000) &&
+        (!('requiredCapabilities' in data) || isValidCapabilityList(data.requiredCapabilities)) &&
+        (!('optionalCapabilities' in data) || isValidCapabilityList(data.optionalCapabilities)) &&
+        (!('knowledgeSlots' in data) || (isValidList(data.knowledgeSlots, 50) && (data.knowledgeSlots.size() == 0 || data.knowledgeSlots[0] is map))) &&
+        (!('triggers' in data) || (isValidList(data.triggers, 50) && (data.triggers.size() == 0 || data.triggers[0] is map))) &&
+        (!('agents' in data) || (isValidList(data.agents, 50) && (data.agents.size() == 0 || data.agents[0] is map))) &&
+        (!('tasks' in data) || (isValidList(data.tasks, 50) && (data.tasks.size() == 0 || data.tasks[0] is map))) &&
+        (!('approvalGates' in data) || isBoundedStringList(data.approvalGates, 20, 80)) &&
+        (!('tenantOverrides' in data) || isBoundedMap(data.tenantOverrides, 30)) &&
+        data.createdAt is timestamp &&
+        (!('updatedAt' in data) || data.updatedAt is timestamp);
+    }
+
+    function isValidHiredAgent(data, employeeId, orgId) {
+      return data.keys().hasAll(['id', 'orgId', 'name', 'role', 'goal', 'modelTier', 'status', 'maxSteps', 'createdAt']) &&
+        data.keys().hasOnly([
+          'id', 'orgId', 'name', 'department', 'role', 'goal', 'backstory',
+          'sopCollectionIds', 'mcpToolAllowlist', 'uses', 'slots',
+          'modelTier', 'status', 'canDelegate', 'maxSteps', 'maxRunCostMyr',
+          'templateId', 'createdAt', 'updatedAt'
+        ]) &&
+        isBoundedString(data.id, 1, 64) && data.id == employeeId &&
+        isBoundedString(data.orgId, 1, 64) && data.orgId == orgId &&
+        isBoundedString(data.name, 1, 120) &&
+        (!('department' in data) || isBoundedString(data.department, 1, 64)) &&
+        isBoundedString(data.role, 1, 120) &&
+        isBoundedString(data.goal, 1, 1000) &&
+        (!('backstory' in data) || isBoundedString(data.backstory, 0, 3000)) &&
+        (!('sopCollectionIds' in data) || isBoundedStringList(data.sopCollectionIds, 20, 64)) &&
+        (!('mcpToolAllowlist' in data) || isBoundedStringList(data.mcpToolAllowlist, 30, 80)) &&
+        (!('uses' in data) || isValidCapabilityList(data.uses)) &&
+        (!('slots' in data) || isValidSlotList(data.slots)) &&
+        data.modelTier in ['gemini-flash', 'gemini-pro', 'local-ollama'] &&
+        data.status in ['active', 'paused', 'staged'] &&
+        (!('canDelegate' in data) || data.canDelegate is bool) &&
+        data.maxSteps is int && data.maxSteps >= 1 && data.maxSteps <= 50 &&
+        (!('maxRunCostMyr' in data) || (data.maxRunCostMyr is number && data.maxRunCostMyr >= 0 && data.maxRunCostMyr <= 10000)) &&
+        (!('templateId' in data) || isBoundedString(data.templateId, 1, 80)) &&
+        data.createdAt is timestamp &&
+        (!('updatedAt' in data) || data.updatedAt is timestamp);
+    }
+
+    function isValidHiredCrew(data, crewId, orgId) {
+      return data.keys().hasAll(['id', 'orgId', 'packId', 'name', 'processMode', 'status', 'createdAt']) &&
+        data.keys().hasOnly([
+          'id', 'orgId', 'packId', 'name', 'processMode', 'status',
+          'agentIds', 'approvalGates', 'scheduleCron', 'maxSpawnDepth',
+          'maxConcurrentSpawns', 'dailyTokenBudget', 'createdAt', 'updatedAt'
+        ]) &&
+        isBoundedString(data.id, 1, 64) && data.id == crewId &&
+        isBoundedString(data.orgId, 1, 64) && data.orgId == orgId &&
+        isBoundedString(data.packId, 1, 80) &&
+        isBoundedString(data.name, 1, 120) &&
+        data.processMode in ['sequential', 'hierarchical', 'event_triggered'] &&
+        data.status in ['staged', 'active', 'paused'] &&
+        (!('agentIds' in data) || isBoundedStringList(data.agentIds, 25, 64)) &&
+        (!('approvalGates' in data) || isBoundedStringList(data.approvalGates, 20, 80)) &&
+        (!('scheduleCron' in data) || isBoundedString(data.scheduleCron, 0, 100)) &&
+        (!('maxSpawnDepth' in data) || (data.maxSpawnDepth is int && data.maxSpawnDepth >= 1 && data.maxSpawnDepth <= 5)) &&
+        (!('maxConcurrentSpawns' in data) || (data.maxConcurrentSpawns is int && data.maxConcurrentSpawns >= 1 && data.maxConcurrentSpawns <= 100)) &&
+        (!('dailyTokenBudget' in data) || (data.dailyTokenBudget is int && data.dailyTokenBudget >= 0 && data.dailyTokenBudget <= 10000000)) &&
+        data.createdAt is timestamp &&
+        (!('updatedAt' in data) || data.updatedAt is timestamp);
+    }
+
+    function isValidBookedSlot(slot) {
+      return isValidMap(slot, ['startIso', 'displayLabel', 'meetLink']) &&
+        slot.keys().hasAll(['startIso', 'displayLabel', 'meetLink']) &&
+        isBoundedString(slot.startIso, 10, 64) &&
+        isBoundedString(slot.displayLabel, 1, 120) &&
+        isValidUrl(slot.meetLink);
+    }
+
+    function isValidOutreachSequence(data, seqId, orgId) {
+      return data.keys().hasAll(['id', 'tenantId', 'leadId', 'leadEmail', 'leadName', 'company', 'subject', 'body', 'status']) &&
+        data.keys().hasOnly([
+          'id', 'tenantId', 'leadId', 'leadEmail', 'leadName', 'company',
+          'subject', 'body', 'sopCitation', 'status', 'scheduledFollowUps',
+          'replySnippet', 'bookedSlot', 'createdAt', 'updatedAt'
+        ]) &&
+        isBoundedString(data.id, 1, 64) && data.id == seqId &&
+        isBoundedString(data.tenantId, 1, 64) && data.tenantId == orgId &&
+        isBoundedString(data.leadId, 1, 64) &&
+        isValidEmail(data.leadEmail) &&
+        isBoundedString(data.leadName, 1, 120) &&
+        isBoundedString(data.company, 1, 160) &&
+        isBoundedString(data.subject, 1, 300) &&
+        isBoundedString(data.body, 1, 20000) &&
+        (!('sopCitation' in data) || isBoundedString(data.sopCitation, 0, 500)) &&
+        data.status in ['pending_approval', 'active_cadence', 'replied_halted', 'meeting_booked', 'rejected'] &&
+        (!('scheduledFollowUps' in data) || (isValidList(data.scheduledFollowUps, 10) && (data.scheduledFollowUps.size() == 0 || data.scheduledFollowUps[0] is map))) &&
+        (!('replySnippet' in data) || isBoundedString(data.replySnippet, 0, 2000)) &&
+        (!('bookedSlot' in data) || isValidBookedSlot(data.bookedSlot)) &&
+        (!('createdAt' in data) || data.createdAt is timestamp) &&
+        (!('updatedAt' in data) || data.updatedAt is timestamp);
+    }
+
+    function isValidCrewRun(data, runId, orgId) {
+      return data.keys().hasAll([
+          'id', 'tenantId', 'crewPackId', 'triggerLabel', 'status',
+          'startedAt', 'spawnedWorkersCount', 'totalCogsMyr'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'tenantId', 'crewPackId', 'triggerLabel', 'status',
+          'startedAt', 'completedAt', 'spawnedWorkersCount', 'totalCogsMyr',
+          'steps', 'errorMessage', 'updatedAt'
+        ]) &&
+        isBoundedString(data.id, 1, 64) && data.id == runId &&
+        isBoundedString(data.tenantId, 1, 64) && data.tenantId == orgId &&
+        isBoundedString(data.crewPackId, 1, 80) &&
+        isBoundedString(data.triggerLabel, 1, 200) &&
+        data.status in ['running', 'completed', 'awaiting_approval', 'blocked_cap', 'blocked_paused', 'failed'] &&
+        data.startedAt is timestamp &&
+        (!('completedAt' in data) || data.completedAt is timestamp) &&
+        data.spawnedWorkersCount is int && data.spawnedWorkersCount >= 0 && data.spawnedWorkersCount <= 500 &&
+        data.totalCogsMyr is number && data.totalCogsMyr >= 0 && data.totalCogsMyr <= 100000 &&
+        (!('steps' in data) || (isValidList(data.steps, 100) && (data.steps.size() == 0 || data.steps[0] is map))) &&
+        (!('errorMessage' in data) || isBoundedString(data.errorMessage, 0, 2000)) &&
+        (!('updatedAt' in data) || data.updatedAt is timestamp);
+    }
+
+    function isValidRunStep(data, stepId) {
+      return data.keys().hasAll([
+          'stepNumber', 'agentId', 'agentRole', 'modelTier',
+          'toolUsed', 'policyDecision', 'summary', 'latencyMs', 'cogsMyr'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'stepNumber', 'agentId', 'agentRole', 'modelTier',
+          'toolUsed', 'policyDecision', 'summary', 'citation',
+          'zodValid', 'latencyMs', 'cogsMyr', 'createdAt'
+        ]) &&
+        (!('id' in data) || (isBoundedString(data.id, 1, 64) && data.id == stepId)) &&
+        data.stepNumber is int && data.stepNumber >= 1 && data.stepNumber <= 1000 &&
+        isBoundedString(data.agentId, 1, 80) &&
+        isBoundedString(data.agentRole, 1, 120) &&
+        data.modelTier in ['gemini-flash', 'gemini-pro', 'local-ollama', 'deterministic'] &&
+        isBoundedString(data.toolUsed, 1, 120) &&
+        data.policyDecision in ['ALLOW', 'PAUSE_FOR_APPROVAL', 'BLOCKED'] &&
+        isBoundedString(data.summary, 1, 4000) &&
+        (!('citation' in data) || isBoundedString(data.citation, 0, 500)) &&
+        (!('zodValid' in data) || data.zodValid is bool) &&
+        data.latencyMs is int && data.latencyMs >= 0 && data.latencyMs <= 3600000 &&
+        data.cogsMyr is number && data.cogsMyr >= 0 && data.cogsMyr <= 10000 &&
+        (!('createdAt' in data) || data.createdAt is timestamp);
+    }
+
+    function isValidKnowledgeCollection(data, colId, orgId) {
+      return data.keys().hasAll(['id', 'tenantId', 'slotId', 'docName', 'indexed', 'updatedAt']) &&
+        data.keys().hasOnly([
+          'id', 'tenantId', 'slotId', 'docName', 'summary', 'citationsCount',
+          'indexed', 'excerptSample', 'departmentScope', 'storagePath',
+          'mimeType', 'fileSizeBytes', 'uploadedByUid', 'createdAt', 'updatedAt'
+        ]) &&
+        isBoundedString(data.id, 1, 64) && data.id == colId &&
+        isBoundedString(data.tenantId, 1, 64) && data.tenantId == orgId &&
+        data.slotId in ['pricing_guide', 'company_policies', 'bookkeeping_folder', 'brand_voice'] &&
+        isBoundedString(data.docName, 1, 200) &&
+        (!('summary' in data) || isBoundedString(data.summary, 0, 2000)) &&
+        (!('citationsCount' in data) || (data.citationsCount is int && data.citationsCount >= 0 && data.citationsCount <= 100000)) &&
+        data.indexed is bool &&
+        (!('excerptSample' in data) || isBoundedString(data.excerptSample, 0, 1000)) &&
+        (!('departmentScope' in data) || data.departmentScope in ['public_sales', 'all_staff', 'finance_only', 'hr_confidential']) &&
+        (!('storagePath' in data) || isTenantScopedStoragePath(data.storagePath, orgId)) &&
+        (!('mimeType' in data) || isBoundedString(data.mimeType, 1, 120)) &&
+        (!('fileSizeBytes' in data) || (data.fileSizeBytes is int && data.fileSizeBytes >= 0 && data.fileSizeBytes <= 52428800)) &&
+        (!('uploadedByUid' in data) || isBoundedString(data.uploadedByUid, 1, 128)) &&
+        (!('createdAt' in data) || data.createdAt is timestamp) &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidKnowledgeChunk(data, chunkId, orgId, colId) {
+      return data.keys().hasAll(['id', 'tenantId', 'collectionId', 'chunkIndex', 'content', 'createdAt']) &&
+        data.keys().hasOnly([
+          'id', 'tenantId', 'collectionId', 'chunkIndex', 'content',
+          'sectionRef', 'pageNumber', 'departmentScope',
+          'embeddingModel', 'embedding', 'createdAt'
+        ]) &&
+        isBoundedString(data.id, 1, 80) && data.id == chunkId &&
+        isBoundedString(data.tenantId, 1, 64) && data.tenantId == orgId &&
+        isBoundedString(data.collectionId, 1, 64) && data.collectionId == colId &&
+        data.chunkIndex is int && data.chunkIndex >= 0 && data.chunkIndex <= 100000 &&
+        isBoundedString(data.content, 1, 16000) &&
+        (!('sectionRef' in data) || isBoundedString(data.sectionRef, 0, 200)) &&
+        (!('pageNumber' in data) || (data.pageNumber is int && data.pageNumber >= 1 && data.pageNumber <= 10000)) &&
+        (!('departmentScope' in data) || data.departmentScope in ['public_sales', 'all_staff', 'finance_only', 'hr_confidential']) &&
+        (!('embeddingModel' in data) || isBoundedString(data.embeddingModel, 1, 80)) &&
+        (!('embedding' in data) || (isValidList(data.embedding, 4096) && (data.embedding.size() == 0 || (data.embedding[0] is number && data.embedding[data.embedding.size() - 1] is number)))) &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidSharedWorkbook(data, workbookId, orgId) {
+      return data.keys().hasAll(['id', 'tenantId', 'fileName', 'lastUpdatedAt']) &&
+        data.keys().hasOnly([
+          'id', 'tenantId', 'fileName', 'provider', 'folderPath', 'storagePath',
+          'preservedFormulas', 'backups', 'committedRows', 'stagingRows',
+          'lockedColumns', 'leaseLockedBy', 'leaseExpiresAt',
+          'uploadedByUid', 'createdAt', 'lastUpdatedAt'
+        ]) &&
+        isBoundedString(data.id, 1, 64) && data.id == workbookId &&
+        isBoundedString(data.tenantId, 1, 64) && data.tenantId == orgId &&
+        isBoundedString(data.fileName, 1, 200) &&
+        (!('provider' in data) || data.provider in ['local_exceljs', 'gdrive_sheets', 'onedrive_excel', 'smb_local_folder', 'dropbox_upload']) &&
+        (!('folderPath' in data) || isBoundedString(data.folderPath, 0, 400)) &&
+        (!('storagePath' in data) || isTenantScopedStoragePath(data.storagePath, orgId)) &&
+        (!('preservedFormulas' in data) || isBoundedStringList(data.preservedFormulas, 30, 200)) &&
+        (!('backups' in data) || (isValidList(data.backups, 50) && (data.backups.size() == 0 || data.backups[0] is map))) &&
+        (!('committedRows' in data) || (isValidList(data.committedRows, 500) && (data.committedRows.size() == 0 || data.committedRows[0] is map))) &&
+        (!('stagingRows' in data) || (isValidList(data.stagingRows, 500) && (data.stagingRows.size() == 0 || data.stagingRows[0] is map))) &&
+        (!('lockedColumns' in data) || isBoundedStringList(data.lockedColumns, 30, 80)) &&
+        (!('leaseLockedBy' in data) || isBoundedString(data.leaseLockedBy, 0, 128)) &&
+        (!('leaseExpiresAt' in data) || data.leaseExpiresAt is timestamp) &&
+        (!('uploadedByUid' in data) || isBoundedString(data.uploadedByUid, 1, 128)) &&
+        (!('createdAt' in data) || data.createdAt is timestamp) &&
+        data.lastUpdatedAt is timestamp;
+    }
+
+    function isValidLead(data, leadId, orgId) {
+      return data.keys().hasAll(['id', 'tenantId', 'fullName', 'company', 'source', 'ocrConfidence', 'stage', 'createdAt']) &&
+        data.keys().hasOnly([
+          'id', 'tenantId', 'fullName', 'jobTitle', 'company', 'email', 'phone',
+          'source', 'ocrConfidence', 'stage', 'dedupeHash', 'notes', 'createdAt', 'updatedAt'
+        ]) &&
+        isBoundedString(data.id, 1, 64) && data.id == leadId &&
+        isBoundedString(data.tenantId, 1, 64) && data.tenantId == orgId &&
+        isBoundedString(data.fullName, 1, 120) &&
+        (!('jobTitle' in data) || isBoundedString(data.jobTitle, 0, 120)) &&
+        isBoundedString(data.company, 1, 160) &&
+        (!('email' in data) || isValidEmail(data.email)) &&
+        (!('phone' in data) || isBoundedString(data.phone, 0, 40)) &&
+        data.source in ['whatsapp_card_ocr', 'batch_expo_ocr', 'inbound_webhook', 'manual_operator'] &&
+        data.ocrConfidence is number && data.ocrConfidence >= 0 && data.ocrConfidence <= 1 &&
+        data.stage in ['new_lead', 'awaiting_approval', 'outreach_active', 'replied_positive', 'meeting_booked', 'archived'] &&
+        (!('dedupeHash' in data) || isBoundedString(data.dedupeHash, 1, 128)) &&
+        (!('notes' in data) || isBoundedString(data.notes, 0, 2000)) &&
+        data.createdAt is timestamp &&
+        (!('updatedAt' in data) || data.updatedAt is timestamp);
+    }
+
+    function isValidApproval(data, approvalId, orgId) {
+      return data.keys().hasAll([
+          'id', 'tenantId', 'runId', 'idempotencyKey', 'actionType',
+          'title', 'summary', 'channel', 'status', 'createdAt', 'payload'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'tenantId', 'runId', 'idempotencyKey', 'actionType',
+          'title', 'summary', 'channel', 'status', 'createdAt',
+          'decidedAt', 'decidedBy', 'decisionNote', 'payload'
+        ]) &&
+        isBoundedString(data.id, 1, 64) && data.id == approvalId &&
+        isBoundedString(data.tenantId, 1, 64) && data.tenantId == orgId &&
+        isBoundedString(data.runId, 1, 64) &&
+        isBoundedString(data.idempotencyKey, 8, 128) &&
+        data.actionType in ['outbound_email_send', 'calendar_booking_confirm', 'excel_commit_update', 'expense_claim_payout'] &&
+        isBoundedString(data.title, 1, 200) &&
+        isBoundedString(data.summary, 1, 2000) &&
+        data.channel in ['whatsapp', 'portal'] &&
+        data.status in ['pending', 'approved', 'rejected'] &&
+        data.createdAt is timestamp &&
+        (!('decidedAt' in data) || data.decidedAt is timestamp) &&
+        (!('decidedBy' in data) || isBoundedString(data.decidedBy, 1, 128)) &&
+        (!('decisionNote' in data) || isBoundedString(data.decisionNote, 0, 1000)) &&
+        isBoundedMap(data.payload, 30);
+    }
+
+    function isValidAuditLog(data, auditId, orgId) {
+      return data.keys().hasAll(['id', 'tenantId', 'actor', 'event', 'detail', 'timestamp']) &&
+        data.keys().hasOnly([
+          'id', 'tenantId', 'actor', 'actorUid', 'event',
+          'detail', 'runId', 'approvalId', 'timestamp'
+        ]) &&
+        isBoundedString(data.id, 1, 64) && data.id == auditId &&
+        isBoundedString(data.tenantId, 1, 64) && data.tenantId == orgId &&
+        isBoundedString(data.actor, 1, 120) &&
+        (!('actorUid' in data) || isBoundedString(data.actorUid, 1, 128)) &&
+        isBoundedString(data.event, 1, 120) &&
+        isBoundedString(data.detail, 1, 4000) &&
+        (!('runId' in data) || isBoundedString(data.runId, 1, 64)) &&
+        (!('approvalId' in data) || isBoundedString(data.approvalId, 1, 64)) &&
+        data.timestamp is timestamp;
+    }
+
+    // ===============================================================
+    // Collection Match Rules
+    // ===============================================================
+
+    // 1. Agency Operators (Operator Builder & Fleet Studio)
+    match /platform_operators/{uid} {
+      allow get: if isAuthenticated() && (isOwner(uid) || isOperator());
+      allow list: if isOperator();
+      allow create: if isOperatorAdmin() && isValidPlatformOperator(request.resource.data, uid);
+      allow update: if isOperatorAdmin() &&
+        isValidPlatformOperator(request.resource.data, uid) &&
+        areImmutableFieldsUnchanged(['createdAt']) &&
+        isOptionalImmutableFieldUnchanged('uid');
+      allow delete: if isOperatorAdmin() && uid != request.auth.uid;
+    }
+
+    // 2. Interactive Live Sales Demo Templates (Operator-only)
+    match /demo_templates/{demoId} {
+      allow read: if isOperator();
+      allow create: if isOperator() && isValidDemoTemplate(request.resource.data, demoId);
+      allow update: if isOperator() &&
+        isValidDemoTemplate(request.resource.data, demoId) &&
+        areImmutableFieldsUnchanged(['id', 'isDemo', 'createdAt']);
+      allow delete: if isOperator();
+    }
+
+    // 3. Multi-Tenant SME Workspaces (Non-self-service; Operator provisioned)
+    match /tenants/{orgId} {
+      allow read: if isOperator() || isTenantMember(orgId);
+      allow create: if isOperator() && isValidTenant(request.resource.data, orgId);
+      allow update: if isOperator() &&
+        isValidTenant(request.resource.data, orgId) &&
+        areImmutableFieldsUnchanged(['id', 'isDemo', 'createdAt']);
+      allow delete: if isOperator();
+
+      // 4.1 Tenant Subscription & Billing Caps (Operator writes only)
+      match /subscription/{docId} {
+        allow read: if (isOperator() && tenantExists(orgId)) || isTenantMember(orgId);
+        allow create: if isOperator() &&
+          tenantExistsOrCreatedAfter(orgId) &&
+          isValidSubscription(request.resource.data);
+        allow update: if isOperator() &&
+          tenantExists(orgId) &&
+          isValidSubscription(request.resource.data) &&
+          isOptionalImmutableFieldUnchanged('createdAt');
+        allow delete: if isOperator();
+      }
+
+      // 4.2 SME Portal Members (Operator or Tenant Owner managing non-owner staff)
+      match /members/{uid} {
+        allow read: if (isOperator() && tenantExists(orgId)) || isTenantMember(orgId);
+        allow create: if isValidMember(request.resource.data) && (
+          (isOperator() && tenantExistsOrCreatedAfter(orgId)) ||
+          (isTenantOwner(orgId) &&
+            uid != request.auth.uid &&
+            request.resource.data.role != 'owner' &&
+            'updatedAt' in request.resource.data &&
+            isRecent(request.resource.data.updatedAt))
+        );
+        allow update: if isValidMember(request.resource.data) && (
+          (isOperator() && tenantExists(orgId)) ||
+          (isTenantOwner(orgId) &&
+            uid != request.auth.uid &&
+            resource.data.role != 'owner' &&
+            request.resource.data.role != 'owner' &&
+            'updatedAt' in request.resource.data &&
+            isRecent(request.resource.data.updatedAt))
+        );
+        allow delete: if isOperator() ||
+          (isTenantOwner(orgId) && uid != request.auth.uid && resource.data.role != 'owner');
+      }
+
+      // 4.3 Time-Limited 1-Tap Magic Connect Links (No member list; narrow redemption)
+      match /magic_links/{tokenId} {
+        allow get: if (isOperator() && tenantExists(orgId)) || isTenantMember(orgId);
+        allow list: if isOperator() && tenantExists(orgId);
+        allow create: if isOperator() &&
+          tenantExistsOrCreatedAfter(orgId) &&
+          isValidMagicLink(request.resource.data, orgId) &&
+          (request.resource.data.status != 'pending' || request.resource.data.expiresAt > request.time);
+        allow update: if isValidMagicLink(request.resource.data, orgId) && (
+          (isOperator() &&
+            tenantExists(orgId) &&
+            areImmutableFieldsUnchanged(['token', 'tenantId', 'createdAt'])) ||
+          (isTenantMember(orgId) &&
+            resource.data.status == 'pending' &&
+            request.resource.data.status == 'completed' &&
+            request.time < resource.data.expiresAt &&
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'status', 'completedAt', 'completedByUid'
+            ]) &&
+            'completedAt' in request.resource.data &&
+            isRecent(request.resource.data.completedAt) &&
+            'completedByUid' in request.resource.data &&
+            request.resource.data.completedByUid == request.auth.uid)
+        );
+        allow delete: if isOperator();
+      }
+
+      // 4.4 Operator-Only Connector Bindings, Custom APIs & MCP Servers (Secret protection)
+      match /cartridges/{cartridgeId} {
+        allow read: if isOperator() && tenantExists(orgId);
+        allow create: if isOperator() &&
+          tenantExistsOrCreatedAfter(orgId) &&
+          isValidCartridge(request.resource.data);
+        allow update: if isOperator() &&
+          tenantExists(orgId) &&
+          isValidCartridge(request.resource.data) &&
+          isOptionalImmutableFieldUnchanged('createdAt');
+        allow delete: if isOperator();
+      }
+
+      match /custom_apis/{apiId} {
+        allow read: if isOperator() && tenantExists(orgId);
+        allow create: if isOperator() &&
+          tenantExistsOrCreatedAfter(orgId) &&
+          isValidCustomApi(request.resource.data, apiId, orgId);
+        allow update: if isOperator() &&
+          tenantExists(orgId) &&
+          isValidCustomApi(request.resource.data, apiId, orgId) &&
+          areImmutableFieldsUnchanged(['id', 'tenantId', 'createdAt']);
+        allow delete: if isOperator();
+      }
+
+      match /mcp_servers/{serverId} {
+        allow read: if isOperator() && tenantExists(orgId);
+        allow create: if isOperator() &&
+          tenantExistsOrCreatedAfter(orgId) &&
+          isValidMcpServer(request.resource.data, serverId, orgId);
+        allow update: if isOperator() &&
+          tenantExists(orgId) &&
+          isValidMcpServer(request.resource.data, serverId, orgId) &&
+          areImmutableFieldsUnchanged(['id', 'createdAt']) &&
+          isOptionalImmutableFieldUnchanged('tenantId');
+        allow delete: if isOperator();
+      }
+
+      // 4.5 Tenant-Readable, Operator-Managed Workforce & Execution Traces
+      match /role_templates/{templateId} {
+        allow read: if (isOperator() && tenantExists(orgId)) || isTenantMember(orgId);
+        allow create: if isOperator() &&
+          tenantExistsOrCreatedAfter(orgId) &&
+          isValidRoleTemplate(request.resource.data, templateId);
+        allow update: if isOperator() &&
+          tenantExists(orgId) &&
+          isValidRoleTemplate(request.resource.data, templateId) &&
+          areImmutableFieldsUnchanged(['id', 'createdAt']);
+        allow delete: if isOperator();
+      }
+
+      match /hired_agents/{employeeId} {
+        allow read: if (isOperator() && tenantExists(orgId)) || isTenantMember(orgId);
+        allow create: if isOperator() &&
+          tenantExistsOrCreatedAfter(orgId) &&
+          isValidHiredAgent(request.resource.data, employeeId, orgId);
+        allow update: if isOperator() &&
+          tenantExists(orgId) &&
+          isValidHiredAgent(request.resource.data, employeeId, orgId) &&
+          areImmutableFieldsUnchanged(['id', 'orgId', 'createdAt']);
+        allow delete: if isOperator();
+      }
+
+      match /hired_crews/{crewId} {
+        allow read: if (isOperator() && tenantExists(orgId)) || isTenantMember(orgId);
+        allow create: if isOperator() &&
+          tenantExistsOrCreatedAfter(orgId) &&
+          isValidHiredCrew(request.resource.data, crewId, orgId);
+        allow update: if isOperator() &&
+          tenantExists(orgId) &&
+          isValidHiredCrew(request.resource.data, crewId, orgId) &&
+          areImmutableFieldsUnchanged(['id', 'orgId', 'createdAt']);
+        allow delete: if isOperator();
+      }
+
+      match /outreach_sequences/{seqId} {
+        allow read: if (isOperator() && tenantExists(orgId)) || isTenantMember(orgId);
+        allow create: if isOperator() &&
+          tenantExistsOrCreatedAfter(orgId) &&
+          isValidOutreachSequence(request.resource.data, seqId, orgId);
+        allow update: if isOperator() &&
+          tenantExists(orgId) &&
+          isValidOutreachSequence(request.resource.data, seqId, orgId) &&
+          areImmutableFieldsUnchanged(['id', 'tenantId']) &&
+          isOptionalImmutableFieldUnchanged('createdAt');
+        allow delete: if isOperator();
+      }
+
+      match /runs/{runId} {
+        allow read: if (isOperator() && tenantExists(orgId)) || isTenantMember(orgId);
+        allow create: if isOperator() &&
+          tenantExistsOrCreatedAfter(orgId) &&
+          isValidCrewRun(request.resource.data, runId, orgId);
+        allow update: if isOperator() &&
+          tenantExists(orgId) &&
+          isValidCrewRun(request.resource.data, runId, orgId) &&
+          areImmutableFieldsUnchanged(['id', 'tenantId', 'startedAt']);
+        allow delete: if isOperator();
+
+        match /steps/{stepId} {
+          allow read: if (
+            (isOperator() && tenantExists(orgId)) || isTenantMember(orgId)
+          ) && exists(/databases/$(database)/documents/tenants/$(orgId)/runs/$(runId));
+          allow create: if isOperator() &&
+            tenantExistsOrCreatedAfter(orgId) &&
+            existsAfter(/databases/$(database)/documents/tenants/$(orgId)/runs/$(runId)) &&
+            isValidRunStep(request.resource.data, stepId);
+          allow update: if isOperator() &&
+            tenantExists(orgId) &&
+            exists(/databases/$(database)/documents/tenants/$(orgId)/runs/$(runId)) &&
+            isValidRunStep(request.resource.data, stepId) &&
+            isOptionalImmutableFieldUnchanged('id') &&
+            isOptionalImmutableFieldUnchanged('createdAt');
+          allow delete: if isOperator();
+        }
+      }
+
+      // 4.6 Knowledge Drop-Box, Indexed Chunks, Shared Workbooks & Leads
+      match /knowledge_collections/{colId} {
+        allow read: if (isOperator() && tenantExists(orgId)) || isTenantMember(orgId);
+        allow create: if isValidKnowledgeCollection(request.resource.data, colId, orgId) && (
+          (isOperator() && tenantExistsOrCreatedAfter(orgId)) ||
+          (isTenantManagerOrOwner(orgId) &&
+            request.resource.data.indexed == false &&
+            (!('citationsCount' in request.resource.data) || request.resource.data.citationsCount == 0) &&
+            'uploadedByUid' in request.resource.data &&
+            request.resource.data.uploadedByUid == request.auth.uid &&
+            (!('createdAt' in request.resource.data) || isRecent(request.resource.data.createdAt)) &&
+            isRecent(request.resource.data.updatedAt))
+        );
+        allow update: if isValidKnowledgeCollection(request.resource.data, colId, orgId) &&
+          areImmutableFieldsUnchanged(['id', 'tenantId']) &&
+          isOptionalImmutableFieldUnchanged('createdAt') &&
+          isOptionalImmutableFieldUnchanged('uploadedByUid') && (
+            (isOperator() && tenantExists(orgId)) ||
+            (isTenantManagerOrOwner(orgId) &&
+              request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                'docName', 'summary', 'excerptSample', 'departmentScope',
+                'storagePath', 'mimeType', 'fileSizeBytes', 'updatedAt'
+              ]) &&
+              isRecent(request.resource.data.updatedAt))
+          );
+        allow delete: if isOperator() || isTenantManagerOrOwner(orgId);
+
+        // Vector/SOP chunks are server/Admin SDK or operator-managed ONLY
+        match /chunks/{chunkId} {
+          allow read: if (
+            (isOperator() && tenantExists(orgId)) || isTenantMember(orgId)
+          ) && exists(/databases/$(database)/documents/tenants/$(orgId)/knowledge_collections/$(colId));
+          allow create: if isOperator() &&
+            tenantExistsOrCreatedAfter(orgId) &&
+            existsAfter(/databases/$(database)/documents/tenants/$(orgId)/knowledge_collections/$(colId)) &&
+            isValidKnowledgeChunk(request.resource.data, chunkId, orgId, colId);
+          allow update: if isOperator() &&
+            tenantExists(orgId) &&
+            exists(/databases/$(database)/documents/tenants/$(orgId)/knowledge_collections/$(colId)) &&
+            isValidKnowledgeChunk(request.resource.data, chunkId, orgId, colId) &&
+            areImmutableFieldsUnchanged(['id', 'tenantId', 'collectionId', 'createdAt']);
+          allow delete: if isOperator();
+        }
+      }
+
+      match /shared_workbooks/{workbookId} {
+        allow read: if (isOperator() && tenantExists(orgId)) || isTenantMember(orgId);
+        allow create: if isValidSharedWorkbook(request.resource.data, workbookId, orgId) && (
+          (isOperator() && tenantExistsOrCreatedAfter(orgId)) ||
+          (isTenantManagerOrOwner(orgId) &&
+            request.resource.data.keys().hasOnly([
+              'id', 'tenantId', 'fileName', 'provider', 'folderPath',
+              'storagePath', 'uploadedByUid', 'createdAt', 'lastUpdatedAt'
+            ]) &&
+            'uploadedByUid' in request.resource.data &&
+            request.resource.data.uploadedByUid == request.auth.uid &&
+            (!('createdAt' in request.resource.data) || isRecent(request.resource.data.createdAt)) &&
+            isRecent(request.resource.data.lastUpdatedAt))
+        );
+        allow update: if isValidSharedWorkbook(request.resource.data, workbookId, orgId) &&
+          areImmutableFieldsUnchanged(['id', 'tenantId']) &&
+          isOptionalImmutableFieldUnchanged('createdAt') &&
+          isOptionalImmutableFieldUnchanged('uploadedByUid') && (
+            (isOperator() && tenantExists(orgId)) ||
+            (isTenantManagerOrOwner(orgId) &&
+              request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                'fileName', 'provider', 'folderPath', 'storagePath', 'lastUpdatedAt'
+              ]) &&
+              isRecent(request.resource.data.lastUpdatedAt))
+          );
+        allow delete: if isOperator() || isTenantManagerOrOwner(orgId);
+      }
+
+      match /leads/{leadId} {
+        allow read: if (isOperator() && tenantExists(orgId)) || isTenantMember(orgId);
+        allow create: if isOperator() &&
+          tenantExistsOrCreatedAfter(orgId) &&
+          isValidLead(request.resource.data, leadId, orgId);
+        allow update: if isOperator() &&
+          tenantExists(orgId) &&
+          isValidLead(request.resource.data, leadId, orgId) &&
+          areImmutableFieldsUnchanged(['id', 'tenantId', 'createdAt']);
+        allow delete: if isOperator();
+      }
+
+      // 4.7 Approval Inbox (1-Tap Approve/Reject with Idempotency & Immutability)
+      match /approvals/{approvalId} {
+        allow read: if (isOperator() && tenantExists(orgId)) || isTenantMember(orgId);
+        allow create: if isOperator() &&
+          tenantExistsOrCreatedAfter(orgId) &&
+          isValidApproval(request.resource.data, approvalId, orgId);
+        allow update: if isValidApproval(request.resource.data, approvalId, orgId) &&
+          areImmutableFieldsUnchanged([
+            'id', 'tenantId', 'runId', 'idempotencyKey',
+            'actionType', 'createdAt', 'payload'
+          ]) && (
+            (isOperator() && tenantExists(orgId)) ||
+            (isTenantApprover(orgId) &&
+              resource.data.status == 'pending' &&
+              request.resource.data.status in ['approved', 'rejected'] &&
+              request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                'status', 'decidedBy', 'decidedAt', 'decisionNote'
+              ]) &&
+              'decidedBy' in request.resource.data &&
+              request.resource.data.decidedBy == request.auth.uid &&
+              'decidedAt' in request.resource.data &&
+              isRecent(request.resource.data.decidedAt))
+          );
+        allow delete: if isOperator();
+      }
+
+      // 4.8 Append-Only Immutable Compliance Audit Ledger
+      match /audit_logs/{auditId} {
+        allow read: if (isOperator() && tenantExists(orgId)) || isTenantMember(orgId);
+        allow create: if isOperator() &&
+          tenantExistsOrCreatedAfter(orgId) &&
+          isValidAuditLog(request.resource.data, auditId, orgId);
+        allow update: if false;
+        allow delete: if false;
+      }
+    }
+
+    // 5. Default Deny Catch-All
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
