@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getFirebaseAdminAuth } from '@aislaves/demo-sandbox';
+import { verifyFirebaseIdTokenSafe } from '@aislaves/demo-sandbox';
 import {
   encodeSessionCookie,
   SESSION_COOKIE_NAME,
@@ -18,25 +18,21 @@ export async function POST(req: Request) {
     let session: ActiveSession;
 
     if (body.idToken) {
-      const adminAuth = getFirebaseAdminAuth();
-      if (adminAuth) {
-        const decoded = await adminAuth.verifyIdToken(body.idToken);
+      const verified = await verifyFirebaseIdTokenSafe(body.idToken);
+      if (verified) {
         const initialOp = (process.env.INITIAL_OPERATOR_EMAIL || 'timothy.tok@gmail.com').toLowerCase();
-        const email = decoded.email || body.email || 'user@aislaves.my';
+        const email = verified.email || body.email || 'user@aislaves.my';
         session = {
-          role: email.toLowerCase() === initialOp || email.toLowerCase().endsWith('@aislaves.my')
-            ? 'operator'
-            : 'sme_client',
+          role:
+            email.toLowerCase() === initialOp || email.toLowerCase().endsWith('@aislaves.my')
+              ? 'operator'
+              : 'sme_client',
           email,
           tenantId: body.tenantId || 'demo-kopikita',
           mode: 'firebase',
         };
       } else {
-        session = {
-          role: 'operator',
-          email: body.email || 'operator@aislaves.my',
-          mode: 'firebase',
-        };
+        throw new Error('Invalid Firebase ID token');
       }
     } else {
       const role = body.demoRole === 'sme_client' ? 'sme_client' : 'operator';
