@@ -1,7 +1,57 @@
-# AISlaves — Implementation Plan v2.1 (Plug-and-Play Multi-Agent Platform & MCP Hub)
+# AISlaves — Implementation Plan v2.2 (Operator-Managed SME Platform, Pricing & Demo Sandbox)
 
-**Product Vision:** A **Plug-and-Play Multi-Agent Workforce Platform ("Shopify App Store / Lego Bricks for AI Employees")** built on a **CrewAI-style Orchestration Engine** and a **First-Party MCP Server Hub** for SMEs and mid-market businesses.  
-**Delivery Model:** **Hybrid Cloud Control Plane** (Next.js 16 + Firebase + Cloud MCP Hub) + **Lightweight On-Premises Docker Edge Runner** (`aislaves-runner`) for client servers, legacy ERPs, and local shared Excel folders.
+**Product Vision:** A **Done-For-You Managed AI Workforce & Plug-and-Play Agent Platform** built on a **CrewAI-style Orchestration Engine** and a **First-Party MCP Server Hub** — operated **by your agency team for SME clients** (zero SME self-service complexity).  
+**Operating Model:** **Two-Plane Managed Service** — an internal **Operator Builder & Fleet Studio** (`/operator/*` where you build agents, workflows, custom MCP servers, and APIs for clients) + a **Zero-Config SME Supervision Surface** (**WhatsApp Business** + minimalist `/portal/*` ROI & Approvals dashboard).  
+**Delivery Model:** **Hybrid Cloud Control Plane** (Next.js 16 + Firebase + Cloud MCP Hub + REST-to-MCP Bridge) + **Lightweight On-Premises Docker Edge Runner** (`aislaves-runner`) for client servers, legacy ERPs, and local shared Excel folders.
+
+---
+
+## 0. Two-Plane Managed Service Architecture (Operator Studio vs SME Supervision)
+
+SME business owners do **not** want another dashboard where they must write prompts, wire JSON schemas, or debug API keys. They want to **pay an affordable monthly fee for reliable AI staff**, approve sensitive actions in 1 tap on WhatsApp, and track ROI.
+
+```mermaid
+flowchart LR
+    subgraph OP["Plane A: Operator Builder & Fleet Studio (/operator/* - Your Team Only)"]
+        PROV["Multi-Tenant Client Provisioner"]
+        CREWB["Agent, Crew & Workflow Builder (YAML + UI)"]
+        APIFACT["Custom MCP & REST/Webhook API Factory"]
+        MAGIC["1-Tap Magic Connect Link Generator"]
+        DEBUG["Cross-Tenant Run Debugger, Kill-Switch & COGS Margin Ledger"]
+        DEMO["Live Pitch Demo Stage (1-Click Reset Sandbox)"]
+    end
+
+    subgraph WIRE["Frictionless Client Onboarding"]
+        LINK["WhatsApp Magic Link (aislaves.my/connect/:token)"]
+    end
+
+    subgraph SME["Plane B: SME Client Surface (Zero Self-Service Config)"]
+        WA["WhatsApp Business (Snap Cards/Receipts, Boss Pulse, 1-Tap Approve/Reject)"]
+        PORTAL["Minimalist SME Portal (/portal/* - Approvals, ROI Hours Saved, Policy/Excel Drop-Box, Billing)"]
+    end
+
+    PROV --> MAGIC --> LINK --> SME
+    CREWB -->|"Deploys Packs"| SME
+    APIFACT -->|"Custom Client APIs & Cartridges"| CREWB
+    OP -->|"Monitors & Bills"| SME
+```
+
+### Plane A — Operator Builder & Fleet Studio (Internal Only)
+- **Multi-Tenant Client Provisioner:** Create SME client workspaces (`tenants/{orgId}`), assign subscription tier + hard task allowance caps, clone vertical `crew-pack.yaml` blueprints, and track real-time client profitability (`Monthly Retainer - Gemini/WhatsApp/Cloud Run COGS`).
+- **Visual & YAML Agent / Workflow Studio:** Tune agent personas, step limits, model routing (`Gemini Flash` vs `Gemini Pro`), schedules, and approval policies across your entire client fleet from one console.
+- **Custom MCP & API Factory (`mcp-custom-rest-bridge` + Tenant Webhooks):**
+  - Wrap any client's proprietary POS, booking system, warehouse software, or website backend into an Agent-callable **MCP Cartridge** simply by pasting an OpenAPI/cURL spec + auth header (Bearer/API Key/HMAC).
+  - Expose dedicated per-tenant **Inbound Webhook & REST Trigger APIs** (`POST /api/v1/tenants/:slug/hooks/:triggerId`) so a client's website form, Shopify store, or ERP event triggers a Crew instantly.
+- **1-Tap Magic Connect Links (`aislaves.my/connect/:token`):** When a client needs to authorize Gmail, Google Calendar, Xero, Bukku, or drop SOP PDFs, the operator texts them a single time-limited WhatsApp link. The boss logs in or drags-and-drops the PDF in 30 seconds without ever seeing the Agent/Workflow Builder.
+- **Billing Kill-Switch & Fleet Safeguards:** Pause noisy triggers, enforce per-tenant monthly task/cost ceilings, replay failed runs step-by-step, and roll out template updates across multiple SME clients.
+
+### Plane B — SME Client Surface (Zero Technical Complexity)
+- **Primary UX is WhatsApp (90% of daily interaction):** Sales reps snap tradeshow business cards; site staff snap expense receipts or Delivery Orders; staff ask SOP policy questions; the boss receives the **8:30 AM Boss Daily Pulse** and taps `[Approve]` / `[Reject]` interactive buttons.
+- **Minimalist Supervision Portal (`/portal/*`):** Read-only peace-of-mind portal locked behind org RBAC showing only:
+  1. Pending Approvals Queue,
+  2. Live Activity Feed & **"Hours Saved / MYR ROI" Counter**,
+  3. Shared Policy/Excel Drop-Box (upload updated SOP PDFs or view backup snapshots),
+  4. Invoices, Current Usage Bar, & Plan Subscription.
 
 ---
 
@@ -32,7 +82,7 @@ Rather than hardcoding brittle single-purpose workflows or exposing raw chat pro
    - `CrewMemory`: Short-term run state (Firestore run steps), Long-term entity memory (known vendors, repeat leads, customer preferences), and Company SOP RAG context.
 
 4. **Dynamic Agent Spawner & Template Cloner**
-   - **Human Spawning:** Clients browse the **Pre-Configured Library**, click **Hire Agent** or **Hire Crew**, bind their MCP connectors, review default safety caps, and launch in minutes.
+   - **Operator Provisioning:** Operators browse the **Pre-Configured Library** in `/operator`, click **Deploy Crew Pack** onto an SME tenant workspace, bind custom/built-in MCP Cartridges, issue a **Magic Connect Link** for client OAuth slots, verify safety caps, and launch in minutes.
    - **Dynamic Sub-Agent Fan-Out:** Authorized Manager Agents can call `crew.spawnWorkerTask(...)` when batch events arrive (e.g., user drops 40 trade-show business card photos in WhatsApp → Coordinator spawns 40 isolated Card-to-Lead research + draft email workers in parallel).
    - **Hard Safety Bounds:** `maxSpawnDepth = 2` (workers cannot infinitely spawn sub-workers), `maxConcurrentSpawns` per org, and org daily token budget caps.
 
@@ -144,7 +194,7 @@ Crews declare typed **Slots** for tenant-specific unstructured policies and shar
 - `slot:bookkeeping_folder`: Target shared folder (`\\server\Finance\Bookkeeping` via Docker Edge Runner, or Google Drive / OneDrive folder ID) plus naming rules and chart-of-accounts reference.
 - `slot:brand_voice`: Tone rules, email signatures, WhatsApp reply sign-offs, preferred languages (English / BM / Chinese).
 
-Clients simply drag-and-drop PDFs/DOCX files or select a shared folder during onboarding. The platform handles chunking, tenant-isolated vector indexing, version pinning, and read-only citation retrieval automatically.
+Operators upload documents directly in `/operator` or send the SME owner a **1-Tap Magic Connect Link** to drag-and-drop PDFs/DOCX or pick a shared folder cleanly. The platform handles chunking, tenant-isolated vector indexing, version pinning, and read-only citation retrieval automatically.
 
 ### Layer 3: Declarative Crew Packs (`crew-pack.yaml`) + 1-Click Preflight Installer
 
@@ -227,14 +277,14 @@ approvalGates:
   - calendar_booking_confirm
 ```
 
-#### 1-Click Install Preflight Wizard (Customer Onboarding Flow)
+#### 1-Click Operator Preflight & Magic Connect Onboarding
 
-1. Client admin clicks **Install Pack** in the Marketplace.
+1. **Operator** selects the SME tenant workspace inside `/operator/tenants/:id` and clicks **Provision Crew Pack**.
 2. Control plane evaluates `requiredCapabilities` + `knowledgeSlots` against the tenant's active **Cartridges** and **Knowledge Vault**:
-   - **Green Badge:** Already connected (e.g., client previously wired `Gmail` and `Google Calendar` for another Crew — automatically reused).
-   - **Amber Badge:** Missing dependency (e.g., `capability:messaging` not yet paired or `slot:pricing_guide` empty).
-3. Installer renders an inline setup checklist **only for Amber items** (1-click OAuth, API key entry, Docker Edge pairing command, or PDF drag-and-drop).
-4. Once all required rows turn Green, preflight pings each bound Cartridge's healthcheck, validates write scopes, and flips the Crew from `staged` to `active`.
+   - **Green Badge:** Already connected (e.g., client previously authorized `Gmail` and `Google Calendar` — automatically reused).
+   - **Amber Badge:** Missing dependency (e.g., `capability:messaging` not yet paired, legacy POS API needs mapping, or `slot:pricing_guide` empty).
+3. For backend APIs/Docker Edge Runner, the **Operator** binds credentials or spins up a `custom-rest-bridge` adapter directly; for client-owned OAuth accounts (`Gmail`, `Calendar`, `Xero`, `Bukku`) or PDF uploads, the Operator clicks **Generate Magic Connect Link** and sends it to the SME owner on WhatsApp.
+4. Once all required rows turn Green, preflight pings each Cartridge's healthcheck, validates write gates + billing caps, and flips the Crew from `staged` to `active`.
 
 #### Vertical Pack Catalog (Built by Reusing the Same 7 Cartridges)
 
@@ -263,8 +313,9 @@ All tools use the **Model Context Protocol (MCP)** so both **built-in SME connec
 | **`mcp-email-outreach`** | **Gmail OAuth**, **Microsoft 365 / Outlook Graph**, custom SMTP/IMAP | `mail.searchInbox`, `mail.getThread`, `mail.draftColdEmail`, `mail.scheduleFollowUp`, `mail.sendApprovedEmail`, `mail.detectRepliesAndStop` | Thread read (`auto`), Draft (`draft`), Send (`APPROVAL_REQUIRED` by default; optional trusted-cadence toggle), Unsubscribe (`auto` + instant blocklist) |
 | **`mcp-calendar-booking`** | **Google Calendar**, **Microsoft Outlook Calendar** | `cal.getFreeBusySlots`, `cal.proposeMeetingWindows`, `cal.bookAppointmentWithMeet`, `cal.rescheduleEvent` | Availability lookup (`auto`), Slot proposal (`draft` / included in email), Final Calendar Invite (`APPROVAL_REQUIRED` or `auto` within strict rep hours when prospect explicitly confirmed time) |
 | **`mcp-crm-leads`** | Built-in Firestore Pipeline + bi-directional sync to Shared Leads Excel / HubSpot / Pipedrive | `crm.upsertLead`, `crm.logActivity`, `crm.updateStage`, `crm.checkDuplicateLead` | Deduplicates by email/domain/phone before any outreach starts |
+| **`mcp-custom-rest-bridge`** *(Operator API Factory)* | Any client REST / GraphQL / OpenAPI endpoint or Legacy Webhook | Dynamically generated typed tools from OpenAPI/cURL specs + inbound tenant trigger endpoints (`/api/v1/tenants/:slug/hooks/:id`) | Strictly scoped per tenant; outbound mutations require `APPROVAL_REQUIRED` by default |
 
-In addition to these 9 built-in servers, clients and your brother's agency team can register **External Custom MCP Servers** (by HTTPS endpoint + bearer token, or local `stdio` inside the client's `aislaves-runner` Docker config) directly in the MCP Hub UI.
+In addition to these built-in servers, your operator team can turn any SME client's proprietary REST API into an MCP Cartridge in minutes via the **Custom MCP & API Factory**, or register **External Custom MCP Servers** (HTTPS endpoint + bearer token, or local `stdio` inside the client's `aislaves-runner` Docker config) directly inside the Operator Studio.
 
 ---
 
@@ -327,21 +378,28 @@ sequenceDiagram
 ## 4. Updated Firestore Data Model & Monorepo Architecture
 
 ```text
-organizations/{orgId}
-├── members/{uid}                       # owner | manager | finance_reviewer | sales_rep | staff
-├── mcp_servers/{serverId}              # built-in or custom MCP config + connection health
-├── role_templates/                     # global catalog + org custom clones
-├── hired_agents/{employeeId}           # spawned/configured AI employees + tool/SOP bindings
-├── hired_crews/{crewId}                # multi-agent crews (workflow mode, member IDs, schedules)
-├── knowledge_collections/{colId}       # Policies / Guides / SOP vaults with department ACLs
-│   └── chunks/{chunkId}                # indexed text + vector embeddings + doc page/section refs
+platform_operators/{uid}                # Agency operators (admin | builder | support)
+demo_templates/{demoId}                 # Pre-seeded interactive demo snapshots (demo-kopikita | demo-apex)
+
+tenants/{orgId}
+├── subscription                        # planId, taskAllowance, tasksUsed, hardCapMyr, cogsLedgerMyr, status
+├── members/{uid}                       # SME portal users ONLY (owner | manager | finance_reviewer | sales_rep)
+├── magic_links/{tokenId}               # Time-limited 1-tap WhatsApp OAuth / SOP Drop-Box onboarding links
+├── cartridges/{cartridgeId}            # Layer 1 bindings (capability:* -> specific MCP server + encrypted tokens)
+├── custom_apis/{apiId}                 # Operator-defined OpenAPI/REST wrappers & inbound client webhook triggers
+├── mcp_servers/{serverId}              # Built-in or custom MCP config + live health status
+├── role_templates/                     # Global vertical crew-pack manifests + tenant-tuned overrides
+├── hired_agents/{employeeId}           # Deployed AI employees + capability/slot bindings (operator-managed)
+├── hired_crews/{crewId}                # Multi-agent crews (workflow mode, schedules, approval gates)
+├── knowledge_collections/{colId}       # Policies / Guides / SOP slots with department ACLs
+│   └── chunks/{chunkId}                # Indexed text + vector embeddings + doc page/section refs
 ├── shared_workbooks/{workbookId}       # Shared Drive / OneDrive / local SMB Excel registry + schema lock
 ├── leads/{leadId}                      # CRM / Business Card OCR records + deduplication hashes
 ├── outreach_sequences/{seqId}          # Cold email + follow-up state machine (stopped instantly on reply)
-├── runs/{runId}                        # Crew & Agent run execution state + cost ledger
-│   └── steps/{stepId}                  # Individual tool call trace & Zod validation output
-├── approvals/{approvalId}              # Web + WhatsApp 1-tap decision queue + idempotencyKey
-└── audit_logs/{auditId}                # Append-only immutable compliance & action ledger
+├── runs/{runId}                        # Crew & Agent execution trace + real Gemini/WhatsApp COGS breakdown
+│   └── steps/{stepId}                  # Individual MCP tool call trace & Zod validation output
+├── approvals/{approvalId}              # Web Portal + WhatsApp 1-tap decision queue + idempotencyKey
+└── audit_logs/{auditId}                # Append-only immutable compliance & ROI metrics ledger
 ```
 
 ---
@@ -371,32 +429,81 @@ organizations/{orgId}
 
 ## 6. Phased 12-Week Implementation Roadmap
 
-### Phase 1 (Weeks 1–2): Monorepo, Multi-Tenant Auth & Crew/Agent Library UI
-- Scaffold Next.js 16 + TypeScript + Tailwind v4 monorepo (`apps/web`, `packages/shared`, `packages/crew-engine`, `packages/mcp-servers/*`, `packages/edge-runner`).
-- Firebase Auth + Multi-Tenant Org RBAC + Firestore security rules (`firestore.rules` delegated to `firestore-rules-author`).
-- **Pre-Configured Library & Crew Studio UI:** 1-click **Hire Agent / Hire Crew**, Agent spawner configuration (SOP tags, MCP tools, autonomy gates), and Shared Excel / Policy upload pages.
+### Phase 1 (Weeks 1–2): Operator Multi-Tenant Studio, Magic Links & Demo Sandbox
+- Scaffold Next.js 16 + TypeScript + Tailwind v4 monorepo (`apps/web` with `(operator)`, `(portal)`, `(demo-stage)` route groups, `packages/shared`, `packages/crew-engine`, `packages/mcp-servers/*`, `packages/demo-sandbox`, `packages/edge-runner`).
+- Firebase Auth + Multi-Tenant Org RBAC (`platform_operators` vs SME portal `members`, with `firestore.rules` delegated to `firestore-rules-author`).
+- **Operator Studio MVP:** Multi-tenant client provisioner, Agent/Crew YAML & form builder, **1-Tap Magic Connect Link** generator, and Client Supervision Portal (`/portal/*`).
+- **Pre-Configured Interactive Demo Stage (`/operator/demo-stage`):** Seed `demo-kopikita` & `demo-apex` tenants + deterministic `mock-*` Cartridges + 1-click `< 2s` reset so your brother can pitch live prospects from Week 2.
 
-### Phase 2 (Weeks 3–4): Crew Engine, Dynamic Spawner, Policy Gate & Approval Inbox *(Cloud MVP)*
-- Implement `Sequential` + `Hierarchical` Crew orchestration, Gemini tool calling (`@google/genai`), loop/budget circuit breakers, and `spawnWorkerTask` fan-out.
-- Build deterministic Policy Gatekeeper + idempotency enforcement + **Manager Approval Inbox** (Web UI + **1-tap WhatsApp interactive Approve/Reject** buttons) + Immutable Audit Viewer.
+### Phase 2 (Weeks 3–4): Crew Engine, Policy Gate, Custom API Factory & Approval Inbox *(Paid Pilot Ready)*
+- Implement `Sequential`, `Hierarchical`, and `Event-Triggered` Crew orchestration, Gemini tool calling (`@google/genai`), loop/budget circuit breakers, and `spawnWorkerTask` fan-out.
+- Build **`mcp-custom-rest-bridge` + Per-Tenant Inbound Webhook APIs** (`/api/v1/tenants/:slug/hooks/:triggerId`) so operators can wrap any client API into MCP tools without custom code.
+- Build deterministic Policy Gatekeeper + idempotency enforcement + **Manager Approval Inbox** (Web Portal + **1-tap WhatsApp interactive Approve/Reject** buttons) + Tenant COGS & Billing Metering.
 
 ### Phase 3 (Weeks 5–7): Sales "Card-to-Calendar" Crew + Company SOP RAG Server
 - Ship `mcp-vision-ocr` (Business Card OCR), `mcp-crm-leads`, `mcp-email-outreach` (Gmail + M365 + instant reply halt), `mcp-calendar-booking` (Google + Outlook + Meet/Teams invites), and `mcp-knowledge-sop` (PDF/DOCX/XLSX RAG with citations).
-- Launch **Bundle A ("Card-to-Calendar" Crew)** + **Company SOP Helpdesk Agent** for live customer pilots.
+- Launch **Bundle A ("Card-to-Calendar" Crew)** + **Company SOP Helpdesk Agent** for paid SME pilot cohorts.
 
 ### Phase 4 (Weeks 8–10): POS, Shared Bookkeeping Excel & Accounting Crew
 - Ship `mcp-shared-excel` (Drive/OneDrive/local safe workbook engine with auto-backup & formula protection), `mcp-pos-systems` (**StoreHub**, **Loyverse**, **Qashier**, **FeedMe**, Shopify POS + universal Z-report parser), and `mcp-accounting` (**Xero**, **Bukku**, **Odoo**, **QuickBooks**).
 - Add **Malaysia LHDN MyInvois Validator**, **WhatsApp Staff Claims Verifier**, **AR Payment Chaser**, and **8:30 AM Boss Daily Pulse**.
 
-### Phase 5 (Weeks 11–12): On-Premises Docker Edge Runner, Stripe Billing & Agency Launch Kit
+### Phase 5 (Weeks 11–12): On-Premises Docker Edge Runner, FPX/DuitNow Stripe Billing & Scale
 - Package `packages/edge-runner` (`aislaves-runner` Docker image) for client servers running **SQL Account**, **AutoCount**, local SMB Shared Excel folders, MSSQL/Postgres, or optional Ollama/vLLM local inference.
-- Wire Stripe per-agent/per-crew monthly retainers + action/OCR metering (reusing Stripe billing patterns proven in `DataEcho`) and harden prompt-injection + load tests.
+- Wire automated Stripe billing (Cards + **FPX** + **DuitNow QR**), usage allowance alerts, kill-switches, and prompt-injection/load hardening.
 
 ---
 
-## 7. Commercial Packaging Advice
+## 7. Affordable SME Managed-Service Pricing & Unit Economics
 
-Sell **Pre-Configured Digital Teams** on monthly retainers rather than raw AI tokens:
-- **Starter Sales Growth Pack** (*"Card-to-Calendar"* Crew — Business Card OCR + Cold Email/Follow-ups + Calendar Appointment Setter): Setup fee + monthly retainer per sales mailbox/rep.
-- **Finance & POS Ops Pack** (*POS + Shared Excel + Accounting + LHDN MyInvois + Staff Claims*): Setup fee + monthly retainer per company/branch.
-- **On-Premises Server Add-On** (*Docker Edge Runner* for SQL Account / AutoCount / Local SMB Excel / Private DBs): Higher-margin enterprise add-on.
+Because AISlaves is sold **done-for-you** to SMEs (not SaaS tooling), price it cleanly as **"AI Staff Salary"** anchored against real SME hiring costs — **zero per-token billing anxiety** for the SME, while preserving **85%–92% recurring gross margins** for your agency.
+
+### Market Anchor & Your Actual Operator COGS
+- **Real SME Cost of 1 Junior Accounts/Admin Clerk or SDR (Malaysia):** **MYR 2,800 – 4,500/month** all-in (salary + EPF/SOCSO/EIS + training + turnover, approx. USD 650–1,050/mo).
+- **Your Direct COGS per Active SME Tenant (500–2,000 automated tasks/mo):**
+  - **Gemini Models** (`Gemini 2.5 Flash` for 90% OCR/triage/RAG + `Gemini 2.5 Pro` for reasoning/copywriting): **MYR 10 – 30/mo** (`USD 2 – 7/mo`)
+  - **Amortized Firebase + Cloud Run + Vector Storage:** **MYR 15 – 25/mo** (`USD 3 – 6/mo`)
+  - **WhatsApp Cloud API Utility/Service Conversations:** **MYR 15 – 40/mo** (`USD 3 – 9/mo`)
+  - **Total Direct Monthly COGS:** **~MYR 40 – 95/mo (`USD 9 – 22/mo`) -> 85%–92% Gross Margin per Client**
+
+### Recommended SME Retainer Tiers (Predictable "Digital Staff" Packaging)
+
+| Plan | Monthly Retainer | Done-For-You Setup Fee | Included AI Workforce & Connections | Fair-Use Task Allowance | Ideal SME Buyer |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **14-Day Paid Pilot** *("Test-Drive 1 AI Clerk")* | **MYR 299** *one-time (USD 69)* | Included *(100% credited to full setup if converted)* | 1 turnkey workflow connected cleanly (*Card-to-Calendar* OR *POS Daily Close* OR *SOP & Claims*) | Up to 150 completed tasks | Skeptical SME owner who wants proof on real data first |
+| **Starter** *("Single AI Clerk")* | **MYR 399/mo** *(USD 89/mo)* | **MYR 800** *(waived on 12-mo prepay)* | 1 AI Employee Pack, up to 2 app Cartridges, WhatsApp 1-tap approvals, `/portal` ROI view | **500 tasks/mo** *(approx. MYR 0.80/task)* | Solo clinics, insurance/property teams, single-stall F&B |
+| **SME Growth** *("Department AI Crew" — Core Offer)* | **MYR 899/mo** *(USD 199/mo)* | **MYR 1,800** *(~USD 400)* | 1 Full Crew Pack (4–5 Agents) + **Company SOP Vault** + **8:30 AM Boss Daily Pulse**, up to 5 Cartridges, monthly operator tuning | **2,000 tasks/mo** *(approx. MYR 0.45/task)* | 10–50 staff SMEs needing full Sales OR Finance ops coverage |
+| **Pro Back-Office** *("Full AI Workforce + On-Prem")* | **MYR 1,699/mo** *(USD 379/mo)* | **MYR 3,500** *(~USD 780)* | All 3 Crews (12 AI Employees), up to 3 branches/mailboxes, **Docker Edge Runner** (`SQL Account` / `AutoCount` / NAS Excel), 1 Custom REST API wrapper included | **6,000 tasks/mo** + Priority WhatsApp SLA | Multi-outlet F&B chains, trading/wholesale, manufacturing |
+
+### Predictable Add-Ons & Hard-Cap Guardrails
+- **Opt-In Task Top-Up Pack:** **+MYR 99 per 1,000 extra tasks** (when reaching 80% / 100%, the system alerts WhatsApp and pauses non-urgent background runs until topped up — **never** triggers unexpected overage bills).
+- **Extra POS Branch or Sales Rep Mailbox:** **+MYR 149/mo** per additional outlet/rep.
+- **Custom Legacy API / MCP Cartridge Build:** **MYR 1,200 – 2,500 one-time** via the Operator REST-to-MCP Studio *(once built for one client, that Cartridge becomes reusable IP for every future client using the same software)*.
+- **Payment Rails:** Stripe Subscriptions supporting **FPX online banking, DuitNow QR, and Corporate Cards**, with automatic monthly PDF receipts.
+
+---
+
+## 8. Pre-Configured Live Sales Demo Environment ("Pitch-in-a-Box")
+
+To close SME owners in a 10-minute coffee shop or Zoom meeting without fragile live API setups, AISlaves ships with a dedicated **Interactive Demo Sandbox** seeded via `pnpm seed:demo`.
+
+### 1. Two Turnkey Pre-Seeded Demo SME Businesses
+1. **`demo-kopikita` — "KopiKita Artisan Roasters Sdn Bhd" (3-Outlet Malaysian F&B Chain):**
+   - **Pre-wired Data:** StoreHub mock daily Z-reports across 3 branches showing a realistic **MYR 142 cash-drawer vs DuitNow variance** at Subang outlet, real downloadable `KopiKita_Bookkeeping_2026.xlsx` workbook (with `AI_Staging` tab + formula cells preserved), Bukku/Xero supplier invoices, a **Malaysia LHDN MyInvois missing Buyer TIN** flag, a crumpled **RM 45 receipt** tested against the Company Claims SOP (`max meal RM 30`), and a pre-staged **8:30 AM Boss Daily Pulse**.
+2. **`demo-apex` — "Apex Precision Packaging Sdn Bhd" (B2B Wholesale & Manufacturing):**
+   - **Pre-wired Data:** `Apex_Catalog_Pricing_2026.pdf` SOP knowledge vault, 5 trade-show business cards (plus live OCR option), active Gmail/Calendar sandbox, and a paused **Card-to-Calendar** sequence awaiting either prospect reply or manager sign-off.
+
+### 2. Deterministic Sandbox Cartridges (`packages/demo-sandbox`)
+Every Capability Contract (`capability:pos`, `capability:accounting`, `capability:spreadsheet`, `capability:messaging`, `capability:mail`, `capability:calendar`, `capability:crm`) includes a **`mock-*` Sandbox Cartridge** backed by isolated Firestore demo collections and real sample `.xlsx`/`.pdf`/image fixtures. **Zero third-party OAuth failures** during live pitches.
+
+### 3. Split-Screen "Live Pitch Stage" (`/operator/demo-stage`)
+- **Left Pane (What the SME Boss Sees):**
+  - **Interactive WhatsApp Phone Simulator:** Tap *"Send Sample Supplier Receipt"* or *"Send Business Card Photo"*, ask *"Can staff claim RM 60 Grab?"* (returns exact cited SOP clause), inspect the **Boss Daily Pulse**, and tap real interactive **`[Approve]` / `[Reject]`** buttons.
+  - **Prospect Reply Simulator:** Click **"Simulate Prospect Reply ('Thursday 3pm works!')"** -> visibly halts Day-3/Day-7 follow-ups and books a Google Meet calendar hold in real time.
+  - **Live Excel Diff & Backup Viewer:** Shows exact row appended to `AI_Staging` alongside the auto-generated `.bak` safety snapshot.
+- **Right Pane (Behind-the-Scenes Proof & ROI Trust):**
+  - Real-time multi-agent handoff timeline (`Card Scout` -> `Cold Writer` -> `Policy Gatekeeper` -> `Calendar Closer`), exact SOP citations used, deterministic `APPROVAL_REQUIRED` pause state, and a live **"Hours & MYR Saved This Month"** counter tied to the SME's branch count.
+
+### 4. 1-Click `< 2s` Reset + "Live Business Card Hook"
+- **1-Click Reset (`POST /api/operator/demo/reset`):** Wipes temporary demo approvals, Excel mutations, calendar bookings, and chat threads back to clean Day-1 pitch state in under 2 seconds between client meetings.
+- **"Live Business Card Hook" Switch:** Toggle `mock-ocr` to **Real Gemini Vision OCR** mid-pitch so your brother can snap the **actual prospect's business card** with his phone — within 8 seconds, the demo extracts their real name/title/company, drafts a grounded outreach email using demo Company SOPs, and queues the approval card live on screen.
