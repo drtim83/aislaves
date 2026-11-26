@@ -1,0 +1,26 @@
+# Dependencies & build outputs
+node_modules/
+.next/
+out/
+dist/
+build/
+.turbo/
+
+# Environment & credentials
+.env
+.env.*
+!.env.example
+.firebase/
+*-firebase-adminsdk-*.json
+serviceAccountKey*.json
+
+# Testing & coverage
+coverage/
+.nyc_output/
+
+# OS & editor files
+.DS_Store
+*.log
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
