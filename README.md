@@ -1,50 +1,51 @@
-# AISlaves — Hybrid Agent-as-a-Service (AI Workforce) Platform
+# AISlaves — Multi-Agent Workforce Platform & MCP Server Hub
 
-**Hire · Brief · Supervise** role-based digital employees across your business systems — with human-in-the-loop approvals, full audit logs, and optional on-premises execution on client servers.
+**Hire · Spawn · Brief · Supervise** pre-configured AI Employees and multi-agent Crews built on **Model Context Protocol (MCP)** — with **1-tap Human-in-the-Loop approvals** (Web & WhatsApp), safe **Shared Excel Bookkeeping**, **POS & Accounting integrations**, **Company SOP RAG**, and a **"Card-to-Calendar" Sales Growth Crew**.
 
-> Read the full engineering, security, commercial, and 12-week delivery roadmap in [IMPLEMENTATION_PLAN.md](./IMPLEMENTATION_PLAN.md).
-
----
-
-## What It Does
-
-Instead of selling raw chatbots or prompt boxes, **AISlaves** packages autonomous AI workflows as **AI Employees** with clear job descriptions, scoped system permissions, a human manager, and mandatory approval gates before high-impact actions execute:
-
-1. **Hire:** Pick a pre-built department role template (or customize one) with a defined job scope, schedule/triggers, and tool allowlist.
-2. **Brief:** Configure SOPs, escalation thresholds, budget/authority limits, and connect business systems (Gmail/M365, WhatsApp, CRM, Odoo/Xero/Accounting/ERP, internal SQL databases).
-3. **Supervise:** Every draft, PO, email reply, journal entry, or database write is governed by a deterministic policy gatekeeper — safe reads run autonomously, while sensitive writes pause in the **Manager Approval Inbox** with full context, payload diff, and one-tap Approve/Reject controls plus an immutable audit trail.
+> Read the full engineering specification, MCP tool contracts, data model, guardrails, and 12-week delivery roadmap in [IMPLEMENTATION_PLAN.md](./IMPLEMENTATION_PLAN.md).
 
 ---
 
-## Hybrid Architecture (Cloud Control Plane + Client Edge Runner)
+## Core Platform Capabilities
+
+1. **CrewAI-Style Multi-Agent Engine & Dynamic Spawner**
+   - Define `Agent` (`role`, `goal`, `backstory`, `sopCollectionIds`, `mcpToolAllowlist`, `modelTier`), `Task` (`expectedOutputSchema`, `dependsOnTaskIds`, `approvalPolicy`), and `Crew` (`sequential`, `hierarchical` with a Manager Agent, or `event_triggered`).
+   - Spawn single AI Employees from a **12-template Pre-Configured Library** or fan out sub-agents dynamically (e.g., scanning 40 expo business cards and spawning 40 parallel research + cold-email tasks within concurrency and budget caps).
+
+2. **First-Party 9-Server MCP Hub (Cloud + Client-Server Edge Runner)**
+   - Standardized Model Context Protocol servers with code-enforced permission tiers (`READ`, `DRAFT`, `APPROVAL_REQUIRED`, `BLOCKED`):
+     - **`mcp-whatsapp-business`**: Customer triage, media intake (cards/receipts/DOs), and **1-tap Manager Approve/Reject interactive buttons inside WhatsApp**.
+     - **`mcp-pos-systems`**: StoreHub, Loyverse, Qashier, FeedMe POS, Shopify POS/Square, Xilnex/Zeoniq + universal daily Z-report CSV/Excel drop parser.
+     - **`mcp-accounting`**: Xero, QuickBooks Online, Bukku, Financio, Odoo Accounting + On-Premises **SQL Account** and **AutoCount** via the Docker Edge Runner.
+     - **`mcp-shared-excel`**: Safe bookkeeping workbook engine for Google Drive, OneDrive/SharePoint, Dropbox, or local SMB shares (auto-backups before write, formula preservation, schema column locks).
+     - **`mcp-knowledge-sop`**: Company Policies, Guides & SOP RAG Vault with department RBAC and mandatory document/section citations.
+     - **`mcp-vision-ocr`**: Multimodal Gemini Vision OCR for Business Cards, Supplier Invoices, Crumpled Staff Receipts, Delivery Orders (DOs), and Bank Statements.
+     - **`mcp-email-outreach`**: Gmail / M365 / SMTP cold email drafting, warm-up rate limits, Day-3/Day-7 follow-ups, and instant stop-on-reply detection.
+     - **`mcp-calendar-booking`**: Google Calendar & Microsoft Outlook free/busy checks, slot proposals, and automatic invite + Meet/Teams link creation upon prospect confirmation.
+     - **`mcp-crm-leads`**: Bi-directional Lead & Deal pipeline synced with CRM or Shared Excel Lead trackers.
+
+3. **3 Turnkey Pre-Configured Crews (12 Digital Employees)**
+   - **Bundle A — "Card-to-Calendar" Sales Growth Crew:** Business Card OCR & Enricher → Cold Outreach Copywriter (grounded in Company Pitch/Pricing SOP) → Smart Follow-Up Cadence Agent → Reply & Calendar Appointment Setter.
+   - **Bundle B — POS, Shared Excel & Accounting Crew:** POS Daily Closing Agent → AP Invoice/Receipt Bookkeeper → **Malaysia LHDN MyInvois & SST Validator** → **AR Overdue Payment Chaser** → **Shopee/Lazada/GrabFood Payout Reconciler**.
+   - **Bundle C — Company SOP, Claims & Executive Ops Crew:** Company SOP Helpdesk Agent → **WhatsApp Staff Expense Claim & DO Verifier** → **8:30 AM "Boss Daily Pulse" WhatsApp Briefing Agent**.
+
+---
+
+## Hybrid Architecture
 
 ```mermaid
-flowchart LR
-    MGR["Human Manager (Web / Mobile Inbox)"] -->|"Brief / Approve / Reject"| CP["Cloud Control Plane (Next.js 16 + Firebase)"]
-    TRG["Triggers (Webhook / Cron / Inbox / Chat)"] --> CP
-    CP -->|"Plan & Reasons"| LLM["LLM Router (Gemini Flash / Pro / Local LLM)"]
-    LLM --> POL["Deterministic Policy Gatekeeper (READ / DRAFT / APPROVAL / BLOCKED)"]
-    POL -->|"Cloud APIs (Gmail / WhatsApp / Xero / Odoo Cloud)"| CMCP["Cloud MCP Connectors"]
-    POL -->|"Sensitive Write"| APPR["Approval Queue (Manager Sign-Off)"]
-    APPR -->|"Approved"| CMCP
-    POL -->|"Outbound Tunnel (Zero Open Ports)"| EDGE["Client Edge Runner (Docker on Client Server)"]
+flowchart TB
+    LIB["Pre-Configured Agent & Crew Library (12 Templates)"] --> SPAWN["Crew Engine & Dynamic Spawner (Sequential / Hierarchical)"]
+    MGR["Human Manager (Web Dashboard & WhatsApp 1-Tap Inbox)"] --> SPAWN
+    SPAWN --> POLICY["Deterministic Policy Gatekeeper (READ / DRAFT / APPROVAL_REQUIRED / BLOCKED)"]
+    POLICY -->|"Sensitive Writes"| APPR["Approval Queue (Manager Sign-Off)"]
+    APPR -->|"Approved"| MCPHUB["Cloud MCP Hub (WhatsApp, Email, Calendar, POS, Xero, Excel, SOP RAG, OCR)"]
+    POLICY -->|"Safe Read / Draft"| MCPHUB
+    POLICY -->|"Outbound Pull Tunnel (Zero Open Ports)"| EDGE["Client Docker Edge Runner (aislaves-runner)"]
     APPR -->|"Approved"| EDGE
-    EDGE -->|"Local SQL / Legacy ERP (SQL Account / AutoCount / Postgres)"| ERP["Private Client Systems"]
-    POL --> AUD["Immutable Audit Trail & Usage Ledger"]
+    EDGE --> LOCAL["Client On-Prem Systems (SQL Account, AutoCount, Local SMB Excel, Postgres, MSSQL)"]
+    POLICY --> AUDIT["Immutable Audit Trail & Cost Ledger"]
 ```
-
----
-
-## Initial Department Role Catalog (6 Roles)
-
-| Department | Role Focus | Core Automated Tasks | Mandatory Approval Gate |
-| :--- | :--- | :--- | :--- |
-| **Customer Service** | Support & Triage Officer | Triage enquiries, look up order/ticket records, draft replies, follow up, update CRM, escalate exceptions | Sending external refunds/cancellations or VIP escalations |
-| **Marketing** | Campaign & Research Coordinator | Monitor competitors, plan content calendars, draft campaigns, summarize funnel/ad analytics, nurture leads | Publishing external posts, ad spend changes, bulk outreach |
-| **Production Planning** | Scheduling & Capacity Analyst | Review demand & BOMs, inspect material stock & capacity, flag bottlenecks, propose schedule shifts | Modifying confirmed production orders or shop-floor schedules |
-| **Procurement** | Purchasing & Vendor Coordinator | Source suppliers, compare 3-way quotes, draft POs, follow up ETA delays, track bills & stock reorder points | Sending RFQs above limit, issuing/approving Purchase Orders |
-| **Accounting** | AP/AR & Reconciliation Clerk | Extract invoices/receipts via vision OCR, reconcile bank/ledger transactions, track payables, flag anomalies | Posting general ledger / AP bills, payment batches |
-| **Finance Analysis** | FP&A & Variance Analyst | Actual-vs-budget variance reports, anomaly & cashflow alerting, rolling forecasts, executive weekly brief | Sharing board/investor packs or updating official budgets |
 
 ---
 
@@ -53,31 +54,29 @@ flowchart LR
 ```text
 aislaves/
 ├── apps/
-│   └── web/                    # Next.js 16 Control Plane (Org Admin, Brief Studio, Approval Inbox, Audit UI)
+│   └── web/                          # Next.js 16 Control Plane (Crew Studio, MCP Hub, Approval Inbox, SOP Vault)
 ├── packages/
-│   ├── agent-core/             # Agent loop, policy gatekeeper, idempotency, state machine
-│   ├── mcp-connectors/         # Standardized MCP tool adapters (Email, WhatsApp, Xero, Odoo, CRM, SQL)
-│   ├── edge-runner/            # Lightweight Docker worker for on-premises ERP/DB connectivity
-│   └── shared/                 # TypeScript domain schemas, Firestore converters, Zod validators
-├── firestore.rules             # Multi-tenant organization & role-based security rules
-├── firestore.indexes.json      # Composite indexes for approval queues & audit logs
-├── IMPLEMENTATION_PLAN.md      # Full feasibility, architecture, data model & 12-week roadmap
+│   ├── shared/                       # Shared Zod schemas, Crew/Agent/Task types, Firestore converters
+│   ├── crew-engine/                  # CrewAI-style Orchestrator, Manager Delegation, Dynamic Spawner, Policy Gate
+│   ├── mcp-servers/
+│   │   ├── whatsapp-business/        # Meta Cloud API + Manager 1-tap approval buttons
+│   │   ├── pos-systems/              # StoreHub, Loyverse, Qashier, FeedMe, Shopify/Square, Z-report parser
+│   │   ├── accounting/               # Xero, QBO, Bukku, Financio, Odoo, SQL Account, AutoCount
+│   │   ├── shared-excel/             # Safe snapshot + formula-preserving Excel & Sheets updater
+│   │   ├── knowledge-sop/            # RBAC-scoped Policy/SOP/Guide PDF/Docx/Excel RAG server
+│   │   ├── vision-ocr/               # Business Cards, Invoices, Receipts, DOs (Gemini Vision + Zod)
+│   │   ├── email-outreach/           # Gmail/M365/SMTP cold sequences + reply listener + rate limiter
+│   │   ├── calendar-booking/         # Google/Outlook Calendar free/busy + atomic booking + Meet/Teams link
+│   │   └── crm-leads/                # Pipeline tracker synced to HubSpot/Pipedrive or Shared Excel
+│   └── edge-runner/                  # One-command Docker worker for client servers & on-prem ERP/SMB shares
+├── firestore.rules                   # Strict multi-tenant org & department RBAC security rules
+├── firestore.indexes.json            # Composite indexes for approval queues, leads, and audit logs
+├── IMPLEMENTATION_PLAN.md            # Complete v2 engineering & commercial blueprint
 └── README.md
 ```
 
 ---
 
-## Target Tech Stack
-
-- **Web Control Plane:** Next.js 16 (App Router), React 19, TypeScript, Tailwind CSS v4
-- **Auth & Database:** Firebase Authentication + Cloud Firestore (strict multi-tenant org isolation)
-- **AI / Reasoning:** Google Gemini API (`@google/genai` — Gemini Flash for high-volume triage/OCR, Gemini Pro for complex planning/variance analysis) + optional local Ollama/vLLM via Edge Runner
-- **Tool Protocol:** Model Context Protocol (MCP) for uniform, inspectable, per-tool permission enforcement
-- **On-Premises Connectivity:** Lightweight Docker Edge Runner (`aislaves-runner`) connecting outbound over HTTPS/WSS with local secret storage (no inbound firewall ports required on client servers)
-- **Billing:** Stripe subscriptions per hired AI employee ("digital salary") + token/action metering
-
----
-
 ## Documentation
 
-- [Implementation Plan & Feasibility Study](./IMPLEMENTATION_PLAN.md)
+- [Implementation Plan v2 (Crew Engine, MCP Hub, Blueprints & Roadmap)](./IMPLEMENTATION_PLAN.md)
