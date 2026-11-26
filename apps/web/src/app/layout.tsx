@@ -1,15 +1,18 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { Bot, Building2, Link2, PlaySquare } from 'lucide-react';
+import { Bot, Building2, Link2, LogIn, PlaySquare } from 'lucide-react';
+import { getActiveSession } from '@/lib/auth-session';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'AISlaves — Operator Studio & Live SME AI Workforce Sandbox',
+  title: 'AISlaves — Operator Studio & Live SME AI Workforce Platform',
   description:
-    'Managed multi-agent AI employee platform for SMEs with plug-and-play MCP cartridges, safe shared Excel, and live pitch demo.',
+    'Managed multi-agent AI employee platform for SMEs with plug-and-play MCP cartridges, SOP RAG, safe shared Excel, and live pitch demo.',
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const session = await getActiveSession();
+
   return (
     <html lang="en">
       <head>
@@ -25,7 +28,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <span>
                 <span className="block text-sm font-bold tracking-tight">AISlaves Platform</span>
                 <span className="block text-xs text-[var(--text-muted)]">
-                  Done-For-You SME AI Workforce · Plug &amp; Play MCP Hub
+                  Done-For-You SME AI Workforce · Slice 2 Live Cloud Edition
                 </span>
               </span>
             </Link>
@@ -56,7 +59,16 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border)] px-3 py-1.5 text-[var(--text-muted)] no-underline hover:text-[var(--text-primary)]"
               >
                 <Link2 className="h-4 w-4" aria-hidden="true" />
-                Magic Link Preview
+                Magic Link
+              </Link>
+              <Link
+                href="/login"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-muted)] px-3 py-1.5 text-xs font-semibold text-[var(--text-primary)] no-underline hover:border-[var(--accent)]"
+              >
+                <LogIn className="h-3.5 w-3.5 text-[var(--emerald)]" aria-hidden="true" />
+                <span>
+                  {session.role === 'operator' ? 'Operator' : 'SME Boss'} ({session.mode === 'firebase' ? 'Firebase' : 'Demo'})
+                </span>
               </Link>
             </nav>
           </div>

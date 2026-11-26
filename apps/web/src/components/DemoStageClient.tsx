@@ -437,9 +437,17 @@ export function DemoStageClient({ initialState }: Props) {
                       ))}
                     </div>
                     {seq.bookedSlot ? (
-                      <div className="rounded border border-[var(--emerald)] bg-[var(--surface)] px-2.5 py-1.5 font-semibold text-[var(--emerald)]">
-                        Calendar Event Confirmed: {seq.bookedSlot.displayLabel} ·{' '}
-                        {seq.bookedSlot.meetLink}
+                      <div className="flex flex-wrap items-center justify-between gap-2 rounded border border-[var(--emerald)] bg-[var(--surface)] px-2.5 py-1.5 font-semibold text-[var(--emerald)]">
+                        <span>
+                          Calendar Event Confirmed: {seq.bookedSlot.displayLabel} ·{' '}
+                          {seq.bookedSlot.meetLink}
+                        </span>
+                        <a
+                          href={`/api/tenants/${tenant.id}/calendar/${seq.id}/invite.ics`}
+                          className="rounded border border-[var(--emerald)] px-2 py-0.5 text-[11px] font-bold text-[var(--emerald)] no-underline"
+                        >
+                          Download .ics Invite
+                        </a>
                       </div>
                     ) : null}
                   </div>

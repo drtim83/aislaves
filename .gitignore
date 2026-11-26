@@ -20,6 +20,7 @@ coverage/
 
 # Local Slice 1 fallback store & workbook snapshots
 .aislaves-local/
+.netlify/
 *.bak.xlsx
 *.tsbuildinfo
 

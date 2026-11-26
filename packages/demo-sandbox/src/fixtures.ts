@@ -10,6 +10,12 @@ export function buildSeedPlatformState(): PlatformState {
     industry: '3-Outlet Malaysian F&B Chain',
     isDemo: true,
     installedPackIds: ['fnb-pos-bookkeeping', 'sop-claims-pulse'],
+    policySettings: {
+      mealClaimCapMyr: 30,
+      posVarianceCapMyr: 20,
+      dailyEmailWarmupCap: 30,
+      emailsSentToday: 3,
+    },
     subscription: {
       planId: 'sme_growth',
       monthlyRetainerMyr: 899,
@@ -68,6 +74,26 @@ export function buildSeedPlatformState(): PlatformState {
         excerptSample: 'Section 2.4: Flag any POS vs bank variance above MYR 20. Section 4.2: Staff meal cap MYR 30/day.',
       },
     },
+    knowledgeChunks: [
+      {
+        id: 'chk-kopi-1',
+        slotId: 'company_policies',
+        docName: 'KopiKita_Claims_&_Cash_SOP_v3.pdf',
+        sectionTitle: 'Section 2.4 Cash Variance Threshold',
+        content: 'Any daily outlet POS cash or DuitNow QR discrepancy exceeding MYR 20.00 must stay in AI_Staging and escalate immediately to the Director via WhatsApp.',
+        departmentScope: 'finance_only',
+        createdAt: now,
+      },
+      {
+        id: 'chk-kopi-2',
+        slotId: 'company_policies',
+        docName: 'KopiKita_Claims_&_Cash_SOP_v3.pdf',
+        sectionTitle: 'Section 4.2 Staff Meal & Mileage Claims',
+        content: 'Staff meal reimbursements are strictly capped at MYR 30.00/day. Grab or petrol mileage is reimbursed at MYR 0.80/km (max MYR 25/trip). Any amount above MYR 30 requires 1-tap Boss approval.',
+        departmentScope: 'all_staff',
+        createdAt: now,
+      },
+    ],
     customApis: [
       {
         id: 'api-kopi-central-kitchen',
@@ -187,6 +213,12 @@ export function buildSeedPlatformState(): PlatformState {
     industry: 'B2B Food-Grade Packaging & Wholesale',
     isDemo: true,
     installedPackIds: ['sales-card-to-calendar', 'sop-claims-pulse'],
+    policySettings: {
+      mealClaimCapMyr: 30,
+      posVarianceCapMyr: 20,
+      dailyEmailWarmupCap: 30,
+      emailsSentToday: 7,
+    },
     subscription: {
       planId: 'sme_growth',
       monthlyRetainerMyr: 899,
@@ -252,6 +284,26 @@ export function buildSeedPlatformState(): PlatformState {
         excerptSample: 'Section 3.3: Discounts above 5% require Director sign-off.',
       },
     },
+    knowledgeChunks: [
+      {
+        id: 'chk-apex-1',
+        slotId: 'pricing_guide',
+        docName: 'Apex_Catalog_Pricing_2026.pdf',
+        sectionTitle: 'Section 2.1 Wholesale MOQ & Delivery SLA',
+        content: 'Food-grade custom cartons start at MYR 1.45/unit (minimum order quantity 2,000 units) with Halal/ISO inner liners and 7-day Klang Valley turnaround.',
+        departmentScope: 'sales',
+        createdAt: now,
+      },
+      {
+        id: 'chk-apex-2',
+        slotId: 'company_policies',
+        docName: 'Apex_Sales_SLA_&_Discounts_2026.pdf',
+        sectionTitle: 'Section 3.3 Sales Rep Discount Matrix',
+        content: 'Account executives may approve up to 5% volume discount. Discounts of 8% or above require Sales Director 1-tap sign-off.',
+        departmentScope: 'sales',
+        createdAt: now,
+      },
+    ],
     customApis: [
       {
         id: 'api-apex-weblead',

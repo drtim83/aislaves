@@ -8,13 +8,16 @@ import {
   executeCardToCalendarScenario,
   executeInboundWebhookTrigger,
   executePosClosingScenario,
+  executePosZReportUploadScenario,
   executeProspectReplyScenario,
   executeReceiptClaimScenario,
   executeSopQuestionScenario,
   getLocalDataDir,
+  ingestDocumentToChunks,
   resetTenantWorkbook,
 } from '@aislaves/crew-engine';
 import {
+  CAPABILITY_CATALOG,
   SME_PRICING_TIERS,
   type CapabilityId,
   type CustomRestApiSpec,
@@ -23,9 +26,13 @@ import {
   type PlanId,
   type PlatformState,
   type PolicyTier,
+  type TenantPolicySettings,
   type TenantWorkspace,
 } from '@aislaves/shared';
 import { buildSeedPlatformState } from './fixtures';
+import { getFirebaseAdminDb } from './firestore-adapter';
+
+const PLATFORM_DOC_PATH = 'aislaves_platform/global_state';
 
 function getStateFilePath(baseDir?: string): string {
   const dir = getLocalDataDir(baseDir);
@@ -34,6 +41,23 @@ function getStateFilePath(baseDir?: string): string {
 }
 
 export async function loadPlatformState(baseDir?: string): Promise<PlatformState> {
+  const db = getFirebaseAdminDb();
+  if (db) {
+    try {
+      const snap = await db.doc(PLATFORM_DOC_PATH).get();
+      if (snap.exists) {
+        const data = snap.data() as PlatformState;
+        return data;
+      }
+      const initial = buildSeedPlatformState();
+      initial.tenants['demo-kopikita'].workbook = await ensureSeedWorkbook('demo-kopikita', baseDir, true);
+      await savePlatformState(initial, baseDir);
+      return initial;
+    } catch {
+      // Fallback safely to local storage if Firestore call fails transiently
+    }
+  }
+
   const statePath = getStateFilePath(baseDir);
   if (!existsSync(statePath)) {
     const initial = buildSeedPlatformState();
@@ -42,12 +66,41 @@ export async function loadPlatformState(baseDir?: string): Promise<PlatformState
     return initial;
   }
 
-  const parsed = JSON.parse(readFileSync(statePath, 'utf8')) as PlatformState;
-  return parsed;
+  return JSON.parse(readFileSync(statePath, 'utf8')) as PlatformState;
 }
 
-export function savePlatformState(state: PlatformState, baseDir?: string): PlatformState {
-  const next = { ...state, updatedAt: new Date().toISOString() };
+export async function savePlatformState(state: PlatformState, baseDir?: string): Promise<PlatformState> {
+  const next: PlatformState = { ...state, updatedAt: new Date().toISOString() };
+
+  const db = getFirebaseAdminDb();
+  if (db) {
+    try {
+      const batch = db.batch();
+      batch.set(db.doc(PLATFORM_DOC_PATH), next);
+      for (const tenant of Object.values(next.tenants)) {
+        batch.set(
+          db.collection('tenants').doc(tenant.id),
+          {
+            id: tenant.id,
+            slug: tenant.slug,
+            name: tenant.name,
+            industry: tenant.industry,
+            isDemo: tenant.isDemo,
+            installedPackIds: tenant.installedPackIds,
+            planId: tenant.subscription.planId,
+            status: tenant.subscription.status,
+            updatedAt: next.updatedAt,
+          },
+          { merge: true }
+        );
+      }
+      await batch.commit();
+      return next;
+    } catch {
+      // Fall through to local file fallback
+    }
+  }
+
   writeFileSync(getStateFilePath(baseDir), JSON.stringify(next, null, 2), 'utf8');
   return next;
 }
@@ -57,7 +110,6 @@ export async function resetDemoSandbox(baseDir?: string): Promise<PlatformState>
   const freshSeed = buildSeedPlatformState();
   freshSeed.tenants['demo-kopikita'].workbook = await resetTenantWorkbook('demo-kopikita', baseDir);
 
-  // Preserve non-demo provisioned client tenants if operator added any
   for (const [id, tenant] of Object.entries(existing.tenants)) {
     if (!tenant.isDemo && !freshSeed.tenants[id]) {
       freshSeed.tenants[id] = tenant;
@@ -77,11 +129,12 @@ export async function provisionTenantWorkspace(
 ): Promise<{ state: PlatformState; tenant: TenantWorkspace }> {
   const state = await loadPlatformState(baseDir);
   const tier = SME_PRICING_TIERS[input.planId];
-  const slugBase = input.name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '')
-    .slice(0, 28) || 'sme-client';
+  const slugBase =
+    input.name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '')
+      .slice(0, 28) || 'sme-client';
   const id = `client-${slugBase}-${Date.now().toString(36).slice(-4)}`;
   const now = new Date().toISOString();
 
@@ -92,6 +145,12 @@ export async function provisionTenantWorkspace(
     industry: input.industry.trim() || 'SME Operations',
     isDemo: false,
     installedPackIds: input.packIds.filter((pid) => Boolean(getCrewPackById(pid))),
+    policySettings: {
+      mealClaimCapMyr: 30,
+      posVarianceCapMyr: 20,
+      dailyEmailWarmupCap: 30,
+      emailsSentToday: 0,
+    },
     subscription: {
       planId: input.planId,
       monthlyRetainerMyr: tier.monthlyRetainerMyr,
@@ -119,6 +178,7 @@ export async function provisionTenantWorkspace(
       },
     },
     knowledgeSlots: {},
+    knowledgeChunks: [],
     customApis: [],
     leads: [],
     outreachSequences: [],
@@ -156,7 +216,7 @@ export async function provisionTenantWorkspace(
   };
 
   state.tenants[id] = tenant;
-  savePlatformState(state, baseDir);
+  await savePlatformState(state, baseDir);
   return { state, tenant };
 }
 
@@ -189,6 +249,139 @@ export async function updateTenantOperatorControl(
   return savePlatformState(state, baseDir);
 }
 
+export async function updateTenantWorkbenchSettings(
+  input: {
+    tenantId: string;
+    cartridgeUpdates?: Partial<Record<CapabilityId, string>>;
+    policySettings?: Partial<TenantPolicySettings>;
+  },
+  baseDir?: string
+): Promise<PlatformState> {
+  const state = await loadPlatformState(baseDir);
+  const tenant = state.tenants[input.tenantId];
+  if (!tenant) throw new Error(`Tenant ${input.tenantId} not found`);
+
+  const now = new Date().toISOString();
+  if (input.cartridgeUpdates) {
+    for (const [capKey, cartridgeId] of Object.entries(input.cartridgeUpdates)) {
+      const cap = capKey as CapabilityId;
+      const spec = CAPABILITY_CATALOG[cap]?.availableCartridges.find((c) => c.id === cartridgeId);
+      if (spec) {
+        tenant.cartridges[cap] = {
+          cartridgeId: spec.id,
+          label: spec.name,
+          delivery: spec.delivery,
+          connected: true,
+          connectedAt: now,
+        };
+      }
+    }
+  }
+
+  if (input.policySettings) {
+    tenant.policySettings = {
+      mealClaimCapMyr: Number(input.policySettings.mealClaimCapMyr ?? tenant.policySettings?.mealClaimCapMyr ?? 30),
+      posVarianceCapMyr: Number(input.policySettings.posVarianceCapMyr ?? tenant.policySettings?.posVarianceCapMyr ?? 20),
+      dailyEmailWarmupCap: Number(input.policySettings.dailyEmailWarmupCap ?? tenant.policySettings?.dailyEmailWarmupCap ?? 30),
+      emailsSentToday: Number(input.policySettings.emailsSentToday ?? tenant.policySettings?.emailsSentToday ?? 0),
+    };
+  }
+
+  tenant.auditLogs.unshift({
+    id: `audit-wb-${Date.now()}`,
+    tenantId: tenant.id,
+    actor: 'operator:workbench',
+    event: 'WORKBENCH_UPDATED',
+    detail: 'Hot-swapped Cartridge bindings or updated Policy Gatekeeper thresholds.',
+    timestamp: now,
+  });
+
+  return savePlatformState(state, baseDir);
+}
+
+export async function uploadTenantKnowledgeDoc(
+  input: {
+    tenantId: string;
+    slotId: KnowledgeSlotId;
+    fileName: string;
+    mimeType?: string;
+    base64Data?: string;
+    plainText?: string;
+    departmentScope?: 'all_staff' | 'sales' | 'finance_only';
+  },
+  baseDir?: string
+): Promise<{ state: PlatformState; chunksAdded: number }> {
+  const state = await loadPlatformState(baseDir);
+  const tenant = state.tenants[input.tenantId];
+  if (!tenant) throw new Error(`Tenant ${input.tenantId} not found`);
+
+  const buffer = input.base64Data
+    ? Buffer.from(input.base64Data.replace(/^data:[^;]+;base64,/, ''), 'base64')
+    : undefined;
+
+  const newChunks = await ingestDocumentToChunks({
+    slotId: input.slotId,
+    fileName: input.fileName,
+    mimeType: input.mimeType,
+    buffer,
+    plainText: input.plainText,
+    departmentScope: input.departmentScope ?? 'all_staff',
+  });
+
+  if (newChunks.length === 0) {
+    throw new Error(`No readable text extracted from ${input.fileName}`);
+  }
+
+  const existing = tenant.knowledgeChunks ?? [];
+  tenant.knowledgeChunks = [...newChunks, ...existing].slice(0, 60);
+  tenant.knowledgeSlots[input.slotId] = {
+    docName: input.fileName,
+    summary: `Indexed ${newChunks.length} searchable section(s) from ${input.fileName}.`,
+    citationsCount: newChunks.length,
+    indexed: true,
+    updatedAt: new Date().toISOString(),
+    excerptSample: newChunks[0].content.slice(0, 180),
+  };
+
+  tenant.auditLogs.unshift({
+    id: `audit-rag-${Date.now()}`,
+    tenantId: tenant.id,
+    actor: 'operator:sop_rag',
+    event: 'KNOWLEDGE_SLOT_INDEXED',
+    detail: `Indexed ${newChunks.length} chunk(s) into slot:${input.slotId} from ${input.fileName}`,
+    timestamp: new Date().toISOString(),
+  });
+
+  await savePlatformState(state, baseDir);
+  return { state, chunksAdded: newChunks.length };
+}
+
+export async function uploadTenantPosReport(
+  input: {
+    tenantId: string;
+    fileName: string;
+    base64Data?: string;
+    csvText?: string;
+  },
+  baseDir?: string
+): Promise<PlatformState> {
+  const state = await loadPlatformState(baseDir);
+  const tenant = state.tenants[input.tenantId];
+  if (!tenant) throw new Error(`Tenant ${input.tenantId} not found`);
+
+  const buffer = input.base64Data
+    ? Buffer.from(input.base64Data.replace(/^data:[^;]+;base64,/, ''), 'base64')
+    : undefined;
+
+  const { tenant: updated } = await executePosZReportUploadScenario(
+    tenant,
+    { fileName: input.fileName, buffer, csvText: input.csvText },
+    baseDir
+  );
+  state.tenants[tenant.id] = updated;
+  return savePlatformState(state, baseDir);
+}
+
 export async function createMagicConnectLink(
   input: {
     tenantId: string;
@@ -214,7 +407,7 @@ export async function createMagicConnectLink(
   };
 
   state.magicLinks[token] = link;
-  savePlatformState(state, baseDir);
+  await savePlatformState(state, baseDir);
   return { state, link };
 }
 
@@ -281,7 +474,7 @@ export async function completeMagicConnectItem(
     timestamp: now,
   });
 
-  savePlatformState(state, baseDir);
+  await savePlatformState(state, baseDir);
   return { state, link };
 }
 
@@ -329,7 +522,7 @@ export async function registerCustomRestApi(
     timestamp: new Date().toISOString(),
   });
 
-  savePlatformState(state, baseDir);
+  await savePlatformState(state, baseDir);
   return { state, spec };
 }
 
@@ -394,7 +587,7 @@ export async function runTenantDemoAction(
       ).tenant;
       break;
     case 'sop_query':
-      updatedTenant = executeSopQuestionScenario(tenant, input.question).tenant;
+      updatedTenant = (await executeSopQuestionScenario(tenant, input.question, input.geminiApiKey)).tenant;
       break;
     case 'boss_pulse':
       updatedTenant = executeBossDailyPulseScenario(tenant).tenant;
@@ -424,7 +617,7 @@ export async function decideTenantApproval(
 
   const res = await decideApprovalOnTenant(ownerTenant, input, baseDir);
   state.tenants[ownerTenant.id] = res.tenant;
-  savePlatformState(state, baseDir);
+  await savePlatformState(state, baseDir);
   return { state, tenantId: ownerTenant.id, duplicate: res.duplicate };
 }
 
@@ -445,6 +638,6 @@ export async function triggerInboundTenantWebhook(
   }
   const { tenant } = executeInboundWebhookTrigger(target, input.triggerId, input.payload);
   state.tenants[target.id] = tenant;
-  savePlatformState(state, baseDir);
+  await savePlatformState(state, baseDir);
   return { state, tenantId: target.id };
 }

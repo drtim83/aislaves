@@ -14,9 +14,15 @@ import {
   executeCardToCalendarScenario,
   executeInboundWebhookTrigger,
   executeProspectReplyScenario,
+  generateIcsInvite,
+  ingestDocumentToChunks,
   invokeCustomRestBridge,
+  parsePosZReportBuffer,
+  parseWhatsAppWebhookPayload,
+  retrieveCitedChunks,
   stageLedgerRowsSafely,
   toMcpToolDescriptor,
+  verifyWhatsAppWebhook,
 } from '../index';
 
 function makeTestTenant(): TenantWorkspace {
@@ -223,4 +229,102 @@ test('Operator REST-to-MCP Bridge & Tenant Inbound Webhook create MCP tools and 
   });
   assert.equal(run.status, 'completed');
   assert.equal(updated.leads[0].email, 'siti@klangpack.my');
+});
+
+test('Slice 2 SOP RAG ingests pricing documents, enforces RBAC scopes, and cites sections', async () => {
+  const pricingChunks = await ingestDocumentToChunks({
+    slotId: 'pricing_guide',
+    fileName: 'Wholesale_Rates_2026.md',
+    plainText: `# Section 1.2 Carton Pricing\n\nCustom kraft cartons cost MYR 1.35 per unit at 3,000 MOQ.\n\n# Section 2.1 Payment Terms\n\nNet 30 credit requires SST registration.`,
+    departmentScope: 'sales',
+  });
+  const financeChunks = await ingestDocumentToChunks({
+    slotId: 'company_policies',
+    fileName: 'Payroll_Confidential.md',
+    plainText: `# Executive Payroll\n\nDirector bonus pool is 12% EBITDA.`,
+    departmentScope: 'finance_only',
+  });
+
+  const all = [...pricingChunks, ...financeChunks];
+  const salesHits = await retrieveCitedChunks({
+    chunks: all,
+    query: 'What is the carton pricing and MOQ?',
+    allowedScopes: ['all_staff', 'sales'],
+    topK: 2,
+  });
+  assert.equal(salesHits.length, 2);
+  assert.ok(salesHits[0].citation.includes('Wholesale_Rates_2026.md'));
+  assert.ok(salesHits.every((h) => h.departmentScope !== 'finance_only'));
+});
+
+test('Slice 2 RFC 5545 Calendar .ics invite generator builds valid calendar request', () => {
+  const ics = generateIcsInvite({
+    uid: 'ais-test-1',
+    title: 'AISlaves Product Walkthrough',
+    description: 'Discuss carton supply quote.',
+    startIso: '2026-12-03T15:00:00+08:00',
+    durationMinutes: 30,
+    attendeeEmail: 'daniel.tan@freshbake.com.my',
+    meetLink: 'https://meet.google.com/ais-demo-3pm',
+  });
+  assert.ok(ics.includes('BEGIN:VCALENDAR'));
+  assert.ok(ics.includes('BEGIN:VEVENT'));
+  assert.ok(ics.includes('METHOD:REQUEST'));
+  assert.ok(ics.includes('daniel.tan@freshbake.com.my'));
+  assert.ok(ics.includes('END:VCALENDAR'));
+});
+
+test('Slice 2 Universal POS Z-report CSV parser flags variances exceeding custom threshold', async () => {
+  const csv = [
+    'Date,Outlet,POS Reported,Bank Settled,Category',
+    '2026-11-26,KopiKita Bangsar,4500,4500,POS Close',
+    '2026-11-26,KopiKita Subang,3200,3050,POS Close',
+  ].join('\n');
+  const parsed = await parsePosZReportBuffer({
+    fileName: 'storehub_export.csv',
+    csvText: csv,
+    varianceCapMyr: 25,
+  });
+  assert.equal(parsed.rows.length, 2);
+  assert.equal(parsed.flaggedRows.length, 1);
+  assert.equal(parsed.flaggedRows[0].varianceMyr, 150);
+  assert.equal(parsed.grossSalesMyr, 7700);
+});
+
+test('Slice 2 Meta WhatsApp Cloud webhook verifies handshake and extracts 1-tap approval clicks', () => {
+  const challenge = verifyWhatsAppWebhook({
+    mode: 'subscribe',
+    token: 'aislaves-verify',
+    challenge: '987654',
+    expectedToken: 'aislaves-verify',
+  });
+  assert.equal(challenge.ok, true);
+  assert.equal(challenge.body, '987654');
+
+  const events = parseWhatsAppWebhookPayload({
+    entry: [
+      {
+        changes: [
+          {
+            value: {
+              messages: [
+                {
+                  from: '60123456789',
+                  type: 'interactive',
+                  interactive: {
+                    type: 'button_reply',
+                    button_reply: { id: 'approve:appr-123', title: 'Approve' },
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    ],
+  });
+  assert.equal(events.length, 1);
+  assert.equal(events[0].kind, 'approval_tap');
+  assert.equal(events[0].decision, 'approved');
+  assert.equal(events[0].approvalId, 'appr-123');
 });

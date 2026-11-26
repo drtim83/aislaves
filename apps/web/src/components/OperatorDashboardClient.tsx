@@ -483,6 +483,18 @@ export function OperatorDashboardClient({ initialState, crewPacks, pricingTiers 
                             <Link2 className="h-3.5 w-3.5 text-[var(--accent)]" aria-hidden="true" />
                             Magic Link
                           </button>
+                          <Link
+                            href={`/operator/tenants/${tenant.id}`}
+                            className="inline-flex items-center gap-1 rounded border border-[var(--accent)] px-2 py-1 text-xs font-semibold text-[var(--accent)] no-underline hover:opacity-90"
+                          >
+                            Workbench
+                          </Link>
+                          <Link
+                            href={`/operator/tenants/${tenant.id}/invoice`}
+                            className="inline-flex items-center gap-1 rounded border border-[var(--border)] px-2 py-1 text-xs font-semibold text-[var(--text-muted)] no-underline hover:text-[var(--text-primary)]"
+                          >
+                            Statement
+                          </Link>
                         </div>
                         {tenantMagicLink ? (
                           <div className="flex flex-wrap items-center gap-2 text-xs">

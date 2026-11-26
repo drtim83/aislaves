@@ -261,3 +261,53 @@ dialog::backdrop {
   color: var(--danger);
   opacity: 1;
 }
+
+/* Sign-In & Validated Form Controls (validate-input-after-interaction) */
+.field-hint {
+  display: block;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin-block-end: 0.25rem;
+}
+
+.error-msg {
+  display: none;
+  font-size: 0.78rem;
+  color: var(--danger);
+  margin-block-start: 0.3rem;
+}
+
+.validated-input:is(:user-invalid, .user-invalid-fallback) {
+  border-color: var(--danger);
+}
+
+.validated-input:is(:user-invalid, .user-invalid-fallback) + .error-msg {
+  display: block;
+}
+
+.validated-input:user-valid {
+  border-color: var(--emerald);
+}
+
+.visually-hidden:where(:not(:focus-within, :active)) {
+  position: absolute !important;
+  clip-path: inset(50%) !important;
+  overflow: hidden !important;
+  width: 1px !important;
+  height: 1px !important;
+  margin: -1px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  white-space: nowrap !important;
+}
+
+@media print {
+  header,
+  .no-print {
+    display: none !important;
+  }
+  body {
+    background: #ffffff;
+    color: #0f172a;
+  }
+}

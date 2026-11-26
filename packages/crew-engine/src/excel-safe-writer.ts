@@ -329,6 +329,61 @@ export async function readWorkbookBuffer(tenantId: string, baseDir?: string): Pr
   return readFileSync(filePath);
 }
 
+export async function syncWorkbookFromTenantState(
+  tenant: {
+    id: string;
+    workbook: Pick<WorkbookPreviewState, 'committedRows' | 'stagingRows'>;
+  },
+  baseDir?: string
+): Promise<Buffer> {
+  const { filePath } = getTenantWorkbookPaths(tenant.id, baseDir);
+  const wb = new ExcelJS.Workbook();
+  wb.creator = 'AISlaves Safe Excel Engine';
+  wb.created = new Date();
+
+  const summary = wb.addWorksheet(SUMMARY_SHEET);
+  summary.columns = [
+    { width: 14 },
+    { width: 32 },
+    { width: 22 },
+    { width: 20 },
+    { width: 26 },
+    { width: 16 },
+    { width: 26 },
+  ];
+
+  summary.getRow(1).values = [`${tenant.id} — Protected Bookkeeping Master`];
+  summary.getRow(1).getCell(1).font = { bold: true, size: 13 };
+
+  const committed = tenant.workbook.committedRows ?? [];
+  const posSum = committed.reduce((acc, r) => acc + r.posReportedMyr, 0);
+  const bankSum = committed.reduce((acc, r) => acc + r.bankDepositedMyr, 0);
+
+  summary.getRow(2).getCell(2).value = 'TOTAL POS / CLAIM REPORTED (FORMULA)';
+  summary.getRow(2).getCell(4).value = { formula: 'SUM(D7:D200)', result: posSum };
+  summary.getRow(3).getCell(2).value = 'TOTAL BANK DEPOSITED (FORMULA)';
+  summary.getRow(3).getCell(5).value = { formula: 'SUM(E7:E200)', result: bankSum };
+  summary.getRow(4).getCell(2).value = 'NET CASH VARIANCE (FORMULA)';
+  summary.getRow(4).getCell(6).value = { formula: 'D2-E3', result: posSum - bankSum };
+
+  styleHeaderRow(summary.getRow(HEADER_ROW));
+  committed.forEach((row, index) => {
+    writeLedgerRowAt(summary, FIRST_DATA_ROW + index, row);
+  });
+
+  const staging = wb.addWorksheet(STAGING_SHEET);
+  staging.columns = summary.columns;
+  staging.getRow(1).values = ['AI_Staging Queue (Requires 1-Tap Manager Sign-Off Before Master Commit)'];
+  staging.getRow(1).getCell(1).font = { bold: true, size: 12 };
+  styleHeaderRow(staging.getRow(HEADER_ROW));
+  (tenant.workbook.stagingRows ?? []).forEach((row, index) => {
+    writeLedgerRowAt(staging, FIRST_DATA_ROW + index, row);
+  });
+
+  await wb.xlsx.writeFile(filePath);
+  return readFileSync(filePath);
+}
+
 export async function resetTenantWorkbook(tenantId: string, baseDir?: string): Promise<WorkbookPreviewState> {
   return ensureSeedWorkbook(tenantId, baseDir, true);
 }

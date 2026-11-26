@@ -12,6 +12,6 @@
     "@aislaves/crew-engine": "*",
     "@aislaves/crew-packs": "*",
     "@aislaves/shared": "*",
-    "firebase-admin": "^13.2.0"
+    "firebase-admin": "^14.5.1"
   }
 }

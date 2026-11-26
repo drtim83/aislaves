@@ -8,11 +8,14 @@ import {
   type OutreachSequence,
   type TenantWorkspace,
 } from '@aislaves/shared';
+import { dispatchApprovedOutreachEmail } from './cartridges/email-outreach';
+import { parsePosZReportBuffer } from './cartridges/pos-zreport';
 import {
   commitApprovedStagingRows,
   stageLedgerRowsSafely,
 } from './excel-safe-writer';
 import { evaluateToolCallPolicy } from './gatekeeper';
+import { retrieveCitedChunks } from './sop-rag';
 import {
   draftSopGroundedColdEmail,
   extractBusinessCard,
@@ -108,7 +111,15 @@ export async function executeCardToCalendarScenario(
   }
 
   const sampleKeys = opts.mode === 'batch_fanout' ? ['batch_1', 'batch_2', 'batch_3'] : ['trade_show_1'];
+  const ragPricing = await retrieveCitedChunks({
+    chunks: tenant.knowledgeChunks ?? [],
+    query: 'wholesale pricing MOQ delivery turnaround discounts',
+    allowedScopes: ['all_staff', 'sales'],
+    topK: 1,
+    geminiApiKey: opts.geminiApiKey,
+  });
   const pricingGuide =
+    ragPricing[0]?.content ??
     tenant.knowledgeSlots.pricing_guide?.excerptSample ??
     'Standard wholesale packaging starts from MYR 1.45/unit (2,000 MOQ), 7-day Klang Valley SLA.';
 
@@ -624,7 +635,7 @@ export async function executeReceiptClaimScenario(
   }
 
   const receipt = await extractExpenseReceipt(opts ?? {});
-  const policyCapMyr = 30;
+  const policyCapMyr = tenant.policySettings?.mealClaimCapMyr ?? 30;
   const excessMyr = Math.max(0, receipt.amountMyr - policyCapMyr);
 
   tenant.whatsappFeed.push({
@@ -710,10 +721,11 @@ export async function executeReceiptClaimScenario(
   return { tenant, run };
 }
 
-export function executeSopQuestionScenario(
+export async function executeSopQuestionScenario(
   inputTenant: TenantWorkspace,
-  question?: string
-): { tenant: TenantWorkspace; run: CrewRun } {
+  question?: string,
+  geminiApiKey?: string
+): Promise<{ tenant: TenantWorkspace; run: CrewRun }> {
   const tenant = cloneTenant(inputTenant);
   const q =
     question ||
@@ -721,15 +733,26 @@ export function executeSopQuestionScenario(
       ? 'Can floor supervisors claim RM 60 Grab mileage or RM 45 meals without manager pre-approval?'
       : 'What is our minimum wholesale carton MOQ and max sales discount allowed without Director sign-off?');
 
+  const hits = await retrieveCitedChunks({
+    chunks: tenant.knowledgeChunks ?? [],
+    query: q,
+    allowedScopes: ['all_staff', 'sales', 'finance_only'],
+    topK: 2,
+    geminiApiKey,
+  });
+
   const policyCitation =
+    hits[0]?.citation ||
     tenant.knowledgeSlots.company_policies?.docName ||
     tenant.knowledgeSlots.pricing_guide?.docName ||
     'Company_Policy_Handbook.pdf';
 
   const answer =
-    tenant.id === 'demo-kopikita'
-      ? `Per ${policyCitation} (Section 4.2 Staff Claims & Section 4.4 Transport): Staff meals are capped at MYR 30/day and Grab/mileage is reimbursed at MYR 0.80/km (or actual e-hailing receipt up to MYR 25/trip). Any claim exceeding these caps requires 1-tap Director approval before payroll payout.`
-      : `Per ${policyCitation} (Section 2.1 MOQ & Section 3.3 Discount Matrix): Wholesale food-grade cartons require 2,000 units MOQ (starting MYR 1.45/unit). Sales reps may offer up to 5% volume discount independently; anything >= 8% requires 1-tap Director approval.`;
+    hits.length > 0
+      ? `Cited ${hits.map((h) => h.citation).join(' & ')}:\n\n${hits.map((h) => `• ${h.content}`).join('\n')}`
+      : tenant.id === 'demo-kopikita'
+        ? `Per ${policyCitation} (Section 4.2 Staff Claims & Section 4.4 Transport): Staff meals are capped at MYR ${tenant.policySettings?.mealClaimCapMyr ?? 30}/day and Grab/mileage is reimbursed at MYR 0.80/km (or actual e-hailing receipt up to MYR 25/trip).`
+        : `Per ${policyCitation} (Section 2.1 MOQ & Section 3.3 Discount Matrix): Wholesale food-grade cartons require 2,000 units MOQ (starting MYR 1.45/unit).`;
 
   tenant.whatsappFeed.push(
     {
@@ -868,8 +891,19 @@ export async function decideApprovalOnTenant(
     if (approval.actionType === 'outbound_email_send') {
       const seqId = String(approval.payload.sequenceId || '');
       const seq = tenant.outreachSequences.find((s) => s.id === seqId);
+      let dispatchNote = 'Initial email sent & Day-3/Day-7 follow-ups armed.';
       if (seq) {
+        const dispatch = await dispatchApprovedOutreachEmail({
+          tenant,
+          to: seq.leadEmail,
+          subject: seq.subject,
+          body: seq.body,
+        });
+        dispatchNote = dispatch.note;
         seq.status = 'active_cadence';
+        if (tenant.policySettings) {
+          tenant.policySettings.emailsSentToday += 1;
+        }
         const lead = tenant.leads.find((l) => l.id === seq.leadId);
         if (lead) lead.stage = 'outreach_active';
       }
@@ -877,7 +911,7 @@ export async function decideApprovalOnTenant(
         id: `wa-decided-${Date.now()}`,
         sender: 'boss',
         senderLabel: `${opts.actor} [Tapped Approve]`,
-        text: `Approved email outreach: ${approval.title}. Initial email sent & Day-3/Day-7 follow-ups armed.`,
+        text: `Approved email outreach: ${approval.title}. ${dispatchNote}`,
         timestamp: nowTimeLabel(),
         tag: 'SENT',
       });
@@ -1041,5 +1075,120 @@ export function executeInboundWebhookTrigger(
     timestamp: new Date().toISOString(),
   });
 
+  return { tenant, run };
+}
+
+export async function executePosZReportUploadScenario(
+  inputTenant: TenantWorkspace,
+  opts: {
+    fileName: string;
+    buffer?: Buffer;
+    csvText?: string;
+  },
+  baseDir?: string
+): Promise<{ tenant: TenantWorkspace; run: CrewRun }> {
+  const tenant = cloneTenant(inputTenant);
+  const preflight = evaluateToolCallPolicy({
+    tenant,
+    toolName: 'mcp-pos-systems.parseZReportFile',
+    policyTier: 'READ',
+  });
+  if (preflight.decision === 'BLOCKED') {
+    return recordBlockedRun(
+      tenant,
+      'fnb-pos-bookkeeping',
+      `POS File Upload (${opts.fileName})`,
+      preflight.reason,
+      preflight.code === 'TENANT_PAUSED' ? 'blocked_paused' : 'blocked_cap'
+    );
+  }
+
+  const cap = tenant.policySettings?.posVarianceCapMyr ?? 20;
+  const parsed = await parsePosZReportBuffer({
+    fileName: opts.fileName,
+    buffer: opts.buffer,
+    csvText: opts.csvText,
+    varianceCapMyr: cap,
+  });
+
+  if (parsed.rows.length === 0) {
+    throw new Error(`No valid POS rows parsed from ${opts.fileName}`);
+  }
+
+  const { workbook, backupFileName } = await stageLedgerRowsSafely(
+    tenant.id,
+    parsed.rows,
+    `POS file ${opts.fileName} pre-commit backup`,
+    baseDir
+  );
+  tenant.workbook = workbook;
+
+  const approvalId = `appr-zrep-${Date.now()}`;
+  const idempotencyKey = `idem-zrep-${tenant.id}-${Date.now()}`;
+  const runId = `run-${Date.now()}`;
+
+  tenant.approvals.unshift({
+    id: approvalId,
+    tenantId: tenant.id,
+    runId,
+    idempotencyKey,
+    actionType: 'excel_commit_update',
+    title: `Commit ${parsed.rows.length} Uploaded POS Rows (${parsed.flaggedRows.length} Variance Flagged)`,
+    summary: `Parsed ${opts.fileName}: Gross MYR ${parsed.grossSalesMyr.toFixed(2)}, Variance MYR ${parsed.varianceTotalMyr.toFixed(2)} (threshold MYR ${cap}). Backup ${backupFileName} saved.`,
+    channel: 'whatsapp',
+    status: 'pending',
+    createdAt: new Date().toISOString(),
+    payload: { fileName: opts.fileName, rowsCount: parsed.rows.length, backupFileName },
+  });
+
+  tenant.whatsappFeed.push({
+    id: `wa-zrep-${Date.now()}`,
+    sender: 'ai_employee',
+    senderLabel: 'Universal POS Z-Report Parser',
+    text: `Parsed ${opts.fileName} (${parsed.rows.length} rows, Gross MYR ${parsed.grossSalesMyr.toFixed(2)}).\nFlagged ${parsed.flaggedRows.length} row(s) above MYR ${cap} threshold.\n\nStaged in AI_Staging with backup ${backupFileName}. Commit to Master Excel?`,
+    timestamp: nowTimeLabel(),
+    tag: 'Z-REPORT STAGED',
+    approvalId,
+  });
+
+  const cogs = estimateStepCogsMyr('gemini-flash', true);
+  const run: CrewRun = {
+    id: runId,
+    tenantId: tenant.id,
+    crewPackId: 'fnb-pos-bookkeeping',
+    triggerLabel: `Uploaded POS Z-Report (${opts.fileName})`,
+    status: 'awaiting_approval',
+    startedAt: new Date().toISOString(),
+    spawnedWorkersCount: 1,
+    totalCogsMyr: cogs,
+    steps: [
+      {
+        stepNumber: 1,
+        agentId: 'pos_closer',
+        agentRole: 'Universal Z-Report Cartridge',
+        modelTier: 'deterministic',
+        toolUsed: `mcp-pos-systems.parseZReportFile (${opts.fileName})`,
+        policyDecision: 'ALLOW',
+        summary: `Normalized ${parsed.rows.length} outlet rows; flagged ${parsed.flaggedRows.length} variance exception(s).`,
+        latencyMs: 65,
+        cogsMyr: 0.015,
+      },
+      {
+        stepNumber: 2,
+        agentId: 'policy_gatekeeper',
+        agentRole: 'Safe Shared Excel Engine',
+        modelTier: 'deterministic',
+        toolUsed: 'mcp-shared-excel.appendStagingRows',
+        policyDecision: 'PAUSE_FOR_APPROVAL',
+        summary: `Backed up ${backupFileName} and staged ${parsed.rows.length} rows into AI_Staging.`,
+        latencyMs: 55,
+        cogsMyr: 0.04,
+      },
+    ],
+  };
+
+  tenant.subscription.tasksUsed += 1;
+  tenant.subscription.cogsLedgerMyr = Math.round((tenant.subscription.cogsLedgerMyr + cogs) * 1000) / 1000;
+  tenant.runs.unshift(run);
   return { tenant, run };
 }

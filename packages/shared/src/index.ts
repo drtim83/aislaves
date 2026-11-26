@@ -185,6 +185,23 @@ export interface AuditLogEntry {
   timestamp: string;
 }
 
+export interface KnowledgeChunk {
+  id: string;
+  slotId: KnowledgeSlotId;
+  docName: string;
+  sectionTitle: string;
+  content: string;
+  departmentScope: 'all_staff' | 'sales' | 'finance_only';
+  createdAt: string;
+}
+
+export interface TenantPolicySettings {
+  mealClaimCapMyr: number;
+  posVarianceCapMyr: number;
+  dailyEmailWarmupCap: number;
+  emailsSentToday: number;
+}
+
 export interface TenantWorkspace {
   id: string;
   slug: string;
@@ -192,9 +209,11 @@ export interface TenantWorkspace {
   industry: string;
   isDemo: boolean;
   installedPackIds: string[];
+  policySettings?: TenantPolicySettings;
   subscription: TenantSubscription;
   cartridges: Partial<Record<CapabilityId, CartridgeBinding>>;
   knowledgeSlots: Partial<Record<KnowledgeSlotId, KnowledgeSlotBinding>>;
+  knowledgeChunks?: KnowledgeChunk[];
   customApis: CustomRestApiSpec[];
   leads: LeadRecord[];
   outreachSequences: OutreachSequence[];

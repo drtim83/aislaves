@@ -1,7 +1,8 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseCrewPackYaml, type CrewPackManifest } from '@aislaves/shared';
+import { EMBEDDED_PACKS_YAML } from './packs-embedded';
 
 const PACK_FILENAMES = [
   'sales-card-to-calendar.yaml',
@@ -10,10 +11,20 @@ const PACK_FILENAMES = [
 ] as const;
 
 function loadAllCrewPacks(): CrewPackManifest[] {
-  const srcDir = dirname(fileURLToPath(import.meta.url));
-  const packsDir = join(srcDir, '..', 'packs');
+  let packsDir = '';
+  try {
+    const srcDir = dirname(fileURLToPath(import.meta.url));
+    packsDir = join(/*turbopackIgnore: true*/ srcDir, '..', 'packs');
+  } catch {
+    packsDir = '';
+  }
+
   return PACK_FILENAMES.map((fileName) => {
-    const raw = readFileSync(join(packsDir, fileName), 'utf8');
+    const fullPath = packsDir ? join(/*turbopackIgnore: true*/ packsDir, fileName) : '';
+    const raw =
+      fullPath && existsSync(/*turbopackIgnore: true*/ fullPath)
+        ? readFileSync(/*turbopackIgnore: true*/ fullPath, 'utf8')
+        : EMBEDDED_PACKS_YAML[fileName];
     return parseCrewPackYaml(raw);
   });
 }

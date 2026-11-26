@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import { readWorkbookBuffer } from '@aislaves/crew-engine';
+import { readWorkbookBuffer, syncWorkbookFromTenantState } from '@aislaves/crew-engine';
+import { loadPlatformState } from '@aislaves/demo-sandbox';
 
 export const dynamic = 'force-dynamic';
 
@@ -8,7 +9,12 @@ export async function GET(
   context: { params: Promise<{ tenantId: string }> }
 ) {
   const { tenantId } = await context.params;
-  const buffer = await readWorkbookBuffer(tenantId);
+  const state = await loadPlatformState();
+  const tenant = state.tenants[tenantId];
+  const buffer = tenant
+    ? await syncWorkbookFromTenantState(tenant)
+    : await readWorkbookBuffer(tenantId);
+
   return new NextResponse(new Uint8Array(buffer), {
     status: 200,
     headers: {

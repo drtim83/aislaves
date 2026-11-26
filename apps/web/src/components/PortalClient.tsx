@@ -149,15 +149,46 @@ export function PortalClient({ initialState }: Props) {
             <FileText className="h-5 w-5 text-[var(--accent)]" aria-hidden="true" />
             Shared SOPs &amp; Protected Excel Vault
           </h2>
-          {tenant.id === 'demo-kopikita' ? (
-            <a
-              href="/api/workbooks/demo-kopikita/download"
-              className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--emerald)] px-3 py-1.5 text-xs font-bold text-[var(--emerald)] no-underline"
-            >
-              <Download className="h-3.5 w-3.5" aria-hidden="true" />
-              Download Protected Excel (.xlsx)
-            </a>
-          ) : null}
+          <div className="flex flex-wrap items-center gap-2">
+            {tenant.id === 'demo-kopikita' ? (
+              <a
+                href="/api/workbooks/demo-kopikita/download"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--emerald)] px-3 py-1.5 text-xs font-bold text-[var(--emerald)] no-underline"
+              >
+                <Download className="h-3.5 w-3.5" aria-hidden="true" />
+                Download Protected Excel (.xlsx)
+              </a>
+            ) : null}
+            <label className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-muted)] px-3 py-1.5 text-xs font-semibold cursor-pointer hover:border-[var(--accent)]">
+              Upload Updated Policy PDF/DOCX
+              <input
+                type="file"
+                accept=".pdf,.docx,.xlsx,.csv,.md,.txt"
+                className="hidden"
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  const reader = new FileReader();
+                  reader.onload = async () => {
+                    if (typeof reader.result !== 'string') return;
+                    const res = await fetch(`/api/tenants/${tenant.id}/knowledge/upload`, {
+                      method: 'POST',
+                      headers: { 'content-type': 'application/json' },
+                      body: JSON.stringify({
+                        slotId: 'company_policies',
+                        fileName: file.name,
+                        mimeType: file.type,
+                        base64Data: reader.result,
+                      }),
+                    });
+                    const data = (await res.json()) as { state?: PlatformState };
+                    if (data.state) setState(data.state);
+                  };
+                  reader.readAsDataURL(file);
+                }}
+              />
+            </label>
+          </div>
         </div>
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           {Object.entries(tenant.knowledgeSlots).map(([slotKey, doc]) => (
