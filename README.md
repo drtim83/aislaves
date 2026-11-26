@@ -1,12 +1,17 @@
-# AISlaves — Multi-Agent Workforce Platform & MCP Server Hub
+# AISlaves — Plug-and-Play Multi-Agent Workforce Platform & MCP Hub
 
-**Hire · Spawn · Brief · Supervise** pre-configured AI Employees and multi-agent Crews built on **Model Context Protocol (MCP)** — with **1-tap Human-in-the-Loop approvals** (Web & WhatsApp), safe **Shared Excel Bookkeeping**, **POS & Accounting integrations**, **Company SOP RAG**, and a **"Card-to-Calendar" Sales Growth Crew**.
+**Hire · Plug · Brief · Supervise** pre-configured AI Employees and multi-agent Crews built on a **3-Layer Plug-and-Play Architecture** ("Shopify App Store / Lego Bricks for AI Employees") — powered by **Capability Contracts + MCP Cartridges**, **Drop-In Knowledge/Data Slots**, **1-tap Human-in-the-Loop approvals** (Web & WhatsApp), safe **Shared Excel Bookkeeping**, **POS & Accounting integrations**, **Company SOP RAG**, and a **"Card-to-Calendar" Sales Growth Crew**.
 
-> Read the full engineering specification, MCP tool contracts, data model, guardrails, and 12-week delivery roadmap in [IMPLEMENTATION_PLAN.md](./IMPLEMENTATION_PLAN.md).
+> Read the full engineering specification, 3-layer plug-and-play contracts, `crew-pack.yaml` manifest spec, MCP tools, guardrails, and 12-week delivery roadmap in [IMPLEMENTATION_PLAN.md](./IMPLEMENTATION_PLAN.md).
 
 ---
 
 ## Core Platform Capabilities
+
+0. **3-Layer Plug-and-Play Standard (Zero-Code Client Onboarding)**
+   - **Layer 1 — Hot-Swappable MCP Tool "Cartridges":** Agents bind only to normalized **Capability Contracts** (`capability:pos`, `capability:accounting`, `capability:spreadsheet`, `capability:messaging`, `capability:mail`, `capability:calendar`, `capability:crm`). Swap StoreHub <-> Loyverse <-> Qashier or Xero <-> Bukku <-> SQL Account or Local SMB Excel <-> Google Sheets without touching a single prompt.
+   - **Layer 2 — Drop-In Knowledge & Data "Slots":** Packs declare named slots (`slot:company_policies`, `slot:pricing_guide`, `slot:bookkeeping_folder`). Clients simply drag-and-drop PDFs/DOCX or link a shared folder.
+   - **Layer 3 — Declarative Crew Packs (`crew-pack.yaml`) & 1-Click Preflight Installer:** Installing a vertical bundle (*Sales*, *F&B*, *Trading/Wholesale*, *Agency*, *Clinic*) diffs requirements against active cartridges, shows **Green/Amber** status, prompts only missing connections/files, and activates cleanly.
 
 1. **CrewAI-Style Multi-Agent Engine & Dynamic Spawner**
    - Define `Agent` (`role`, `goal`, `backstory`, `sopCollectionIds`, `mcpToolAllowlist`, `modelTier`), `Task` (`expectedOutputSchema`, `dependsOnTaskIds`, `approvalPolicy`), and `Crew` (`sequential`, `hierarchical` with a Manager Agent, or `event_triggered`).
@@ -79,4 +84,4 @@ aislaves/
 
 ## Documentation
 
-- [Implementation Plan v2 (Crew Engine, MCP Hub, Blueprints & Roadmap)](./IMPLEMENTATION_PLAN.md)
+- [Implementation Plan v2.1 (3-Layer Plug-and-Play Architecture, Crew Engine, MCP Hub & Roadmap)](./IMPLEMENTATION_PLAN.md)

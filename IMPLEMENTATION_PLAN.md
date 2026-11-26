@@ -1,6 +1,6 @@
-# AISlaves — Implementation Plan v2 (Crew Engine, MCP Hub & Pre-Configured Workforce)
+# AISlaves — Implementation Plan v2.1 (Plug-and-Play Multi-Agent Platform & MCP Hub)
 
-**Product Vision:** A **CrewAI-style Multi-Agent Orchestration & Pre-Configured AI Employee Platform** paired with a **First-Party MCP Server Hub** built specifically for SMEs and mid-market businesses.  
+**Product Vision:** A **Plug-and-Play Multi-Agent Workforce Platform ("Shopify App Store / Lego Bricks for AI Employees")** built on a **CrewAI-style Orchestration Engine** and a **First-Party MCP Server Hub** for SMEs and mid-market businesses.  
 **Delivery Model:** **Hybrid Cloud Control Plane** (Next.js 16 + Firebase + Cloud MCP Hub) + **Lightweight On-Premises Docker Edge Runner** (`aislaves-runner`) for client servers, legacy ERPs, and local shared Excel folders.
 
 ---
@@ -80,6 +80,171 @@ flowchart TB
     EDGE --> L_XLS
     GATE --> AUDIT
 ```
+
+---
+
+## 1A. Plug-and-Play Architecture (3-Layer Zero-Code Standard)
+
+To operate as true **"plug-and-play AI employees"** rather than custom agency integrations for every SME client, AISlaves separates **business logic (Crews & Agents)** from **vendor connectors (MCP Cartridges)** and **company context (Knowledge/Data Slots)**.
+
+Think of it like **USB-C + Shopify App Store for Digital Workers**:
+- Clients do **not** configure prompts or wire JSON schemas.
+- Developers do **not** rewrite workflows when one client uses **StoreHub + Xero + Google Drive** and another uses **Loyverse + SQL Account + Local Windows Server Excel**.
+
+```mermaid
+flowchart LR
+    subgraph L3["Layer 3: Declarative Crew Packs (Zero-Code YAML)"]
+        PACK["crew-pack.yaml (e.g. Card-to-Calendar)"]
+        PRE["1-Click Preflight Installer (Green vs Amber Check)"]
+        PACK --> PRE
+    end
+
+    subgraph L1["Layer 1: Capability Contracts -> MCP Cartridges"]
+        C_POS["capability:pos"] --> P_SEL["StoreHub / Loyverse / Qashier / FeedMe"]
+        C_ACC["capability:accounting"] --> A_SEL["Xero / QuickBooks / Bukku / SQL Account / AutoCount"]
+        C_XLS["capability:spreadsheet"] --> X_SEL["Local SMB Folder / Google Drive / OneDrive"]
+        C_MSG["capability:messaging"] --> M_SEL["WhatsApp Cloud / Telegram / Slack / Teams"]
+        C_MAIL["capability:mail"] --> E_SEL["Gmail / Outlook 365 / SMTP-IMAP"]
+        C_CAL["capability:calendar"] --> CAL_SEL["Google Calendar / Outlook / Cal.com"]
+        C_CRM["capability:crm"] --> CRM_SEL["Built-in Firestore CRM / HubSpot / Pipedrive / Zoho"]
+    end
+
+    subgraph L2["Layer 2: Drop-In Knowledge & Data Slots"]
+        S_SOP["slot:company_policies (PDF / DOCX / SOPs)"]
+        S_PRICE["slot:pricing_guide (Catalog / T&Cs / Offers)"]
+        S_BOOK["slot:bookkeeping_folder (Shared Excel Root)"]
+    end
+
+    PRE -->|"Binds Required Interfaces"| L1
+    PRE -->|"Prompts Missing Docs or Folders"| L2
+```
+
+### Layer 1: Hot-Swappable MCP Tool "Cartridges" (Capability Contracts)
+
+Every Agent blueprint binds only to abstract **Capability Contracts** (`capability:*`), never to vendor-specific MCP tool names. Each MCP server in `packages/mcp-servers/*` registers as a hot-swappable **Cartridge** that implements one or more contracts via standardized normalized input/output JSON schemas.
+
+| Capability Contract | Standardized Tool Interface (Used by Agents) | Hot-Swappable Cartridges (Per-Tenant Binding) |
+| :--- | :--- | :--- |
+| `capability:pos` | `get_daily_summary`, `list_shifts`, `get_item_sales`, `list_refunds_voids` | StoreHub, Loyverse, Qashier, FeedMe, Slurp, Generic CSV/Webhook POS |
+| `capability:accounting` | `create_draft_bill`, `list_unpaid_invoices`, `record_payment_match`, `get_coa_accounts`, `validate_einvoice` | Xero, QuickBooks Online, Bukku, SQL Account (`aislaves-runner`), AutoCount (`aislaves-runner`) |
+| `capability:spreadsheet` | `acquire_lock`, `read_sheet_summary`, `append_ledger_row`, `snapshot_backup`, `release_lock` | Local SMB/NAS Excel (`aislaves-runner`), Google Drive / Sheets, OneDrive / SharePoint Excel |
+| `capability:messaging` | `send_template_message`, `send_approval_card`, `list_recent_threads`, `download_media` | WhatsApp Business Cloud API, Telegram Bot, Slack, Microsoft Teams |
+| `capability:mail` | `send_email`, `create_draft`, `search_threads`, `get_thread`, `watch_replies` | Gmail OAuth, Microsoft 365 Graph Mail, Custom SMTP/IMAP |
+| `capability:calendar` | `get_free_busy`, `list_slots`, `create_tentative_hold`, `book_event` | Google Calendar, Microsoft Outlook Calendar, Cal.com |
+| `capability:crm` | `upsert_lead`, `log_activity`, `update_stage`, `list_stale_leads` | Built-in AISlaves CRM (Firestore), HubSpot, Pipedrive, Zoho CRM |
+
+> **Why this matters:** Swapping a client from **Loyverse + Local Excel** to **StoreHub + Xero** updates one Cartridge binding row in Firestore (`tenants/{tenantId}/cartridges`). All 12 AI Employees and multi-agent Crews continue working untouched.
+
+### Layer 2: Drop-In Knowledge & Data "Slots"
+
+Crews declare typed **Slots** for tenant-specific unstructured policies and shared operational folders:
+
+- `slot:company_policies`: HR, expense claims, DO/GRN verification rules, refund limits, escalation contacts.
+- `slot:pricing_guide`: Product catalog, tier discounts, payment terms, case studies, approved objection-handling scripts.
+- `slot:bookkeeping_folder`: Target shared folder (`\\server\Finance\Bookkeeping` via Docker Edge Runner, or Google Drive / OneDrive folder ID) plus naming rules and chart-of-accounts reference.
+- `slot:brand_voice`: Tone rules, email signatures, WhatsApp reply sign-offs, preferred languages (English / BM / Chinese).
+
+Clients simply drag-and-drop PDFs/DOCX files or select a shared folder during onboarding. The platform handles chunking, tenant-isolated vector indexing, version pinning, and read-only citation retrieval automatically.
+
+### Layer 3: Declarative Crew Packs (`crew-pack.yaml`) + 1-Click Preflight Installer
+
+New AI departments and vertical bundles are authored as declarative YAML/JSON manifests (`packages/crew-packs/*.yaml`) with **zero custom core code**.
+
+#### Example Pack Manifest: `packs/sales-card-to-calendar/crew-pack.yaml`
+
+```yaml
+id: sales-card-to-calendar
+name: "Card-to-Calendar Sales Growth Crew"
+version: 1.0.0
+category: sales
+description: "Snap a business card or drop a lead -> research prospect -> draft grounded outreach & follow-ups -> book calendar slots on positive reply."
+
+requiredCapabilities:
+  - capability:messaging   # Receive card photos & send 1-tap WhatsApp approvals
+  - capability:mail        # Read/write/send cold outreach & follow-up threads
+  - capability:calendar    # Check free/busy & place holds / book meetings
+  - capability:crm         # Deduplicate contacts & track funnel stages
+
+optionalCapabilities:
+  - capability:spreadsheet # Optional: also log exhibition leads to a master Excel sheet
+
+knowledgeSlots:
+  - id: pricing_guide
+    label: "Products, Pricing Tiers & Pitch Deck (PDF/DOCX)"
+    required: true
+  - id: company_policies
+    label: "Sales SLA, Discount Limits & T&Cs"
+    required: false
+
+triggers:
+  - id: on_business_card_photo
+    source: capability:messaging
+    event: media.image.received
+    filter: "tag:card OR channel:sales-leads"
+  - id: on_prospect_reply
+    source: capability:mail
+    event: thread.reply.received
+  - id: daily_followup_sweep
+    type: cron
+    schedule: "0 9 * * 1-5"
+
+agents:
+  - id: card_scout
+    role: "Business Card OCR & Lead Enricher"
+    uses: [capability:crm, capability:spreadsheet]
+  - id: cold_writer
+    role: "Outbound Sales Copywriter"
+    uses: [capability:mail, capability:crm]
+    slots: [pricing_guide, company_policies]
+  - id: followup_nurturer
+    role: "Follow-Up Cadence Specialist"
+    uses: [capability:mail, capability:crm]
+    slots: [pricing_guide]
+  - id: calendar_closer
+    role: "Reply Triage & Appointment Setter"
+    uses: [capability:mail, capability:calendar, capability:crm]
+
+tasks:
+  - id: extract_and_enrich
+    agent: card_scout
+    trigger: on_business_card_photo
+    outputTo: cold_writer
+  - id: draft_intro_email
+    agent: cold_writer
+    after: extract_and_enrich
+    requiresApproval: outbound_email_send
+  - id: run_followup_touch
+    agent: followup_nurturer
+    trigger: daily_followup_sweep
+    requiresApproval: outbound_email_send
+  - id: propose_and_book_meeting
+    agent: calendar_closer
+    trigger: on_prospect_reply
+    requiresApproval: calendar_booking_confirm
+
+approvalGates:
+  - outbound_email_send   # Preview recipient + subject + full body before sending
+  - calendar_booking_confirm
+```
+
+#### 1-Click Install Preflight Wizard (Customer Onboarding Flow)
+
+1. Client admin clicks **Install Pack** in the Marketplace.
+2. Control plane evaluates `requiredCapabilities` + `knowledgeSlots` against the tenant's active **Cartridges** and **Knowledge Vault**:
+   - **Green Badge:** Already connected (e.g., client previously wired `Gmail` and `Google Calendar` for another Crew — automatically reused).
+   - **Amber Badge:** Missing dependency (e.g., `capability:messaging` not yet paired or `slot:pricing_guide` empty).
+3. Installer renders an inline setup checklist **only for Amber items** (1-click OAuth, API key entry, Docker Edge pairing command, or PDF drag-and-drop).
+4. Once all required rows turn Green, preflight pings each bound Cartridge's healthcheck, validates write scopes, and flips the Crew from `staged` to `active`.
+
+#### Vertical Pack Catalog (Built by Reusing the Same 7 Cartridges)
+
+| Vertical Pack | Required Cartridges | Required Slots | Plug-and-Play Outcome |
+| :--- | :--- | :--- | :--- |
+| **Card-to-Calendar Sales Pack** | `messaging`, `mail`, `calendar`, `crm` | `pricing_guide`, `company_policies` | Snap card photo -> OCR -> grounded outreach -> follow-up -> booked calendar meeting |
+| **F&B Chain POS & Bookkeeping Pack** | `pos`, `spreadsheet`, `accounting`, `messaging` | `bookkeeping_folder`, `company_policies` | Daily multi-outlet Z-report reconciliation -> void/discount anomaly alert -> locked Excel ledger + draft bills |
+| **Trading & Wholesale Ops Pack** | `accounting`, `spreadsheet`, `messaging`, `mail` | `company_policies`, `pricing_guide`, `bookkeeping_folder` | PO/DO/Invoice 3-way check + MyInvois TIN prep + AR overdue WhatsApp chaser |
+| **Agency Outbound & Retainer Pack** | `mail`, `calendar`, `crm`, `accounting`, `messaging` | `pricing_guide`, `company_policies` | Cold lead outreach + reply-to-meeting booking + monthly retainer invoice reminders |
+| **Clinic & Service Centre Pack** | `messaging`, `calendar`, `pos`, `spreadsheet` | `company_policies`, `pricing_guide` | Appointment booking/rescheduling + POS daily cash-up + staff expense claim SOP triage |
 
 ---
 
